@@ -27,6 +27,27 @@ func TestDefaults(t *testing.T) {
 	if cfg.Namespace != "default" {
 		t.Errorf("namespace = %q", cfg.Namespace)
 	}
+	if cfg.Kernel != "" {
+		t.Errorf("kernel default = %q, want empty (runtime default kernel)", cfg.Kernel)
+	}
+}
+
+func TestKernelFlagAndEnv(t *testing.T) {
+	t.Setenv("OSHL_AC_KERNEL", "/from/env")
+	cfg, err := Parse(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Kernel != "/from/env" {
+		t.Errorf("kernel = %q, want env value", cfg.Kernel)
+	}
+	cfg, err = Parse([]string{"--kernel", "/from/flag"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Kernel != "/from/flag" {
+		t.Errorf("kernel = %q, want flag value", cfg.Kernel)
+	}
 }
 
 func TestFlagBeatsEnv(t *testing.T) {

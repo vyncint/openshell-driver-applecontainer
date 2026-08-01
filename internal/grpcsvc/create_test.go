@@ -292,6 +292,71 @@ func TestCreateSandboxAppliesDriverConfigAndResources(t *testing.T) {
 	}
 }
 
+func TestCreateSandboxUsesDriverDefaultKernel(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	kernelPath := filepath.Join(t.TempDir(), "vmlinux-landlock")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.cfg.Kernel = kernelPath
+	client := dialTestServer(t, srv)
+
+	if _, err := client.CreateSandbox(context.Background(), createRequest()); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, srv, reasonBackendReady)
+
+	calls := fake.RunCalls()
+	boot := calls[len(calls)-1]
+	if boot.Kernel != kernelPath {
+		t.Errorf("boot kernel = %q, want driver default %q", boot.Kernel, kernelPath)
+	}
+}
+
+func TestDriverConfigKernelOverridesDefault(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	dir := t.TempDir()
+	defaultKernel := filepath.Join(dir, "vmlinux-default")
+	perSandbox := filepath.Join(dir, "vmlinux-override")
+	for _, p := range []string{defaultKernel, perSandbox} {
+		if err := os.WriteFile(p, []byte("kernel"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv.cfg.Kernel = defaultKernel
+	client := dialTestServer(t, srv)
+
+	req := createRequest()
+	req.Sandbox.Spec.Template.DriverConfig = mustStruct(t, map[string]any{"kernel": perSandbox})
+	if _, err := client.CreateSandbox(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, srv, reasonBackendReady)
+
+	calls := fake.RunCalls()
+	boot := calls[len(calls)-1]
+	if boot.Kernel != perSandbox {
+		t.Errorf("boot kernel = %q, want per-sandbox override %q", boot.Kernel, perSandbox)
+	}
+}
+
+func TestMissingDefaultKernelFailsProvisioning(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	srv.cfg.Kernel = "/nonexistent/vmlinux"
+	client := dialTestServer(t, srv)
+
+	if _, err := client.CreateSandbox(context.Background(), createRequest()); err != nil {
+		t.Fatal(err)
+	}
+	cond := waitForCondition(t, srv, reasonProvisioningFailed)
+	if !strings.Contains(cond.Message, "kernel") || !strings.Contains(cond.Message, "/nonexistent/vmlinux") {
+		t.Errorf("failure message must name the kernel path, got %q", cond.Message)
+	}
+}
+
 func TestValidateRejectsBadDriverConfigAndResources(t *testing.T) {
 	client := dialTestServer(t, newTestServer(t))
 	ctx := context.Background()
