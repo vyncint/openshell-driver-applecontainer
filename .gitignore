@@ -1,0 +1,7 @@
+bin/
+dist/
+*.sock
+state/
+.DS_Store
+coverage.out
+/tmp-*

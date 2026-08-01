@@ -1,0 +1,6 @@
+#!/bin/sh
+# Reject any AI attribution in commit messages.
+if grep -qiE 'claude|anthropic|co-authored-by|generated with|ai-assisted' "$1"; then
+  echo "commit-msg hook: forbidden attribution pattern found. Rewrite the message." >&2
+  exit 1
+fi
