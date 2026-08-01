@@ -1,0 +1,19 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      path: compute_driver.proto
+      value: github.com/vyncint/openshell-driver-applecontainer/internal/gen/computev1
+    - file_option: go_package
+      path: options.proto
+      value: github.com/vyncint/openshell-driver-applecontainer/internal/gen/optionsv1
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.6
+    out: .
+    opt: module=github.com/vyncint/openshell-driver-applecontainer
+  - remote: buf.build/grpc/go:v1.5.1
+    out: .
+    opt: module=github.com/vyncint/openshell-driver-applecontainer
+inputs:
+  - directory: proto

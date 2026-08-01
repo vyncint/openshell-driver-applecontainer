@@ -1,0 +1,15 @@
+openshell-driver-applecontainer
+Copyright 2026 Vyncint Ng
+
+This product includes protocol definitions from NVIDIA OpenShell
+(https://github.com/NVIDIA/OpenShell), redistributed under the terms of the
+Apache License, Version 2.0:
+
+  - proto/compute_driver.proto
+  - proto/options.proto
+
+Source: NVIDIA/OpenShell, tag v0.0.96,
+commit 5541398ccbda05fd951e08e5741b9ca090717f3a.
+SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
+SPDX-License-Identifier: Apache-2.0
+The files are vendored verbatim (unmodified).

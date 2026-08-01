@@ -1,0 +1,11 @@
+version: v2
+lint:
+  use:
+    - STANDARD
+  ignore:
+    # Vendored verbatim from NVIDIA/OpenShell (see NOTICE); not linted to our style.
+    - compute_driver.proto
+    - options.proto
+breaking:
+  use:
+    - FILE

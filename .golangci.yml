@@ -1,0 +1,25 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+    - nolintlint
+  exclusions:
+    generated: lax
+    paths:
+      - internal/gen
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    paths:
+      - internal/gen
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
