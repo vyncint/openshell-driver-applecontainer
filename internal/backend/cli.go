@@ -345,3 +345,16 @@ func (c *CLI) NetworkCreate(ctx context.Context, name string) error {
 	_, err := c.run(ctx, "network", "create", name)
 	return err
 }
+
+func (c *CLI) Logs(ctx context.Context, name string, tail int) (string, error) {
+	args := []string{"logs"}
+	if tail > 0 {
+		args = append(args, "-n", strconv.Itoa(tail))
+	}
+	args = append(args, name)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}

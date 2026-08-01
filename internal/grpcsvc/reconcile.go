@@ -3,6 +3,7 @@ package grpcsvc
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
@@ -37,21 +38,32 @@ func (s *Server) Bootstrap(ctx context.Context) error {
 		byName[c.ID] = c
 	}
 
-	s.mu.Lock()
+	entries := make([]*entry, 0, len(records))
 	for _, rec := range records {
 		e := &entry{rec: rec}
 		if c, ok := byName[rec.ContainerName]; ok {
 			if c.State == "running" {
 				e.cond = readyTrueCondition()
 			} else {
+				// The VM died while the driver was away; attach its
+				// console tail so the failure is diagnosable through
+				// OpenShell instead of via manual container commands.
 				e.cond = exitedCondition()
+				if tail := s.consoleTail(ctx, rec.ContainerName); tail != "" {
+					e.cond.Message += "; console tail:\n" + tail
+				}
 			}
 		} else {
 			e.cond = failedCondition("sandbox VM missing after driver restart")
 		}
-		s.sandboxes[rec.ID] = e
+		entries = append(entries, e)
+	}
+
+	s.mu.Lock()
+	for _, e := range entries {
+		s.sandboxes[e.rec.ID] = e
 		s.log.Info("reconciled sandbox record",
-			"sandbox_id", rec.ID, "container", rec.ContainerName,
+			"sandbox_id", e.rec.ID, "container", e.rec.ContainerName,
 			"status", e.cond.Status, "reason", e.cond.Reason)
 	}
 	known := make(map[string]bool, len(s.sandboxes))
@@ -111,6 +123,7 @@ func (s *Server) pollOnce(ctx context.Context) {
 	}
 
 	var changed []*entry
+	var exited []*entry
 	s.mu.Lock()
 	for _, e := range s.sandboxes {
 		if e.deleting || !e.provisionDone() {
@@ -132,15 +145,56 @@ func (s *Server) pollOnce(ctx context.Context) {
 		if next.Status != e.cond.Status || next.Reason != e.cond.Reason {
 			e.cond = next
 			changed = append(changed, e)
+			if next.Reason == reasonContainerExited {
+				exited = append(exited, e)
+			}
 		}
 	}
 	s.mu.Unlock()
+
+	// Fetched only on the transition, never on steady-state polls, and a
+	// logs failure never blocks the transition itself.
+	for _, e := range exited {
+		tail := s.consoleTail(ctx, e.rec.ContainerName)
+		if tail == "" {
+			continue
+		}
+		s.mu.Lock()
+		if e.cond.Reason == reasonContainerExited {
+			e.cond.Message += "; console tail:\n" + tail
+		}
+		s.mu.Unlock()
+		s.publishPlatformEvent(e.rec.ID, "Warning", reasonContainerExited,
+			"Sandbox VM exited; console tail:\n"+tail)
+	}
 
 	for _, e := range changed {
 		s.log.Info("sandbox state transition",
 			"sandbox_id", e.rec.ID, "status", e.cond.Status, "reason", e.cond.Reason)
 		s.publishSandbox(e)
 	}
+}
+
+// consoleTailLines and consoleTailMaxRunes bound how much guest console
+// output is attached to conditions and events.
+const (
+	consoleTailLines    = 20
+	consoleTailMaxRunes = 700
+)
+
+// consoleTail returns a bounded excerpt of a container's console output,
+// or "" when logs are unavailable.
+func (s *Server) consoleTail(ctx context.Context, name string) string {
+	out, err := s.rt.Logs(ctx, name, consoleTailLines)
+	if err != nil {
+		s.log.Debug("console tail unavailable", "container", name, "err", err)
+		return ""
+	}
+	out = strings.TrimSpace(out)
+	if runes := []rune(out); len(runes) > consoleTailMaxRunes {
+		out = "…" + string(runes[len(runes)-consoleTailMaxRunes:])
+	}
+	return out
 }
 
 // provisionDone reports whether the provisioning task (if any) finished.
