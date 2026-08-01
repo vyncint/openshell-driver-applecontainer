@@ -45,6 +45,10 @@ type Config struct {
 	// resource requirements.
 	CPUs     int64
 	MemoryMB int64
+	// Kernel is a host kernel path applied to every sandbox VM by default
+	// (container run --kernel) — e.g. a build with Landlock enabled. A
+	// per-sandbox driver-config kernel overrides it.
+	Kernel string
 	// LogLevel is the driver's own log level (debug|info|warn|error) and
 	// the default OPENSHELL_LOG_LEVEL for sandboxes without one.
 	LogLevel string
@@ -112,6 +116,7 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.Namespace, "namespace", envOr("NAMESPACE", "default"), "namespace reported for sandboxes")
 	fs.Int64Var(&cfg.CPUs, "cpus", envOrInt("CPUS", 2), "default vCPUs per sandbox VM")
 	fs.Int64Var(&cfg.MemoryMB, "memory", envOrInt("MEMORY_MB", 2048), "default memory per sandbox VM in MiB")
+	fs.StringVar(&cfg.Kernel, "kernel", envOr("KERNEL", ""), "host kernel path used for every sandbox VM by default (e.g. a Landlock-enabled build); per-sandbox driver config overrides it")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOr("LOG_LEVEL", "info"), "log level: debug|info|warn|error")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err

@@ -243,8 +243,14 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	if dcfg.Network != "" {
 		network = dcfg.Network
 	}
+	// Kernel: per-sandbox driver config wins over the driver-level default
+	// (the fleet-wide Landlock escape hatch).
+	kernel := s.cfg.Kernel
 	if dcfg.Kernel != "" {
-		if _, err := os.Stat(dcfg.Kernel); err != nil {
+		kernel = dcfg.Kernel
+	}
+	if kernel != "" {
+		if _, err := os.Stat(kernel); err != nil {
 			return fmt.Errorf("custom kernel: %w", err)
 		}
 	}
@@ -294,7 +300,7 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		CPUs:       cpus,
 		MemoryMB:   memMB,
 		Entrypoint: seed.GuestSeedDir + "/boot.sh",
-		Kernel:     dcfg.Kernel,
+		Kernel:     kernel,
 		UID:        &root,
 		GID:        &root,
 		CapAdd:     []string{"CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_SYS_PTRACE", "CAP_SYSLOG"},

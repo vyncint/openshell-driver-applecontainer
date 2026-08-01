@@ -110,6 +110,7 @@ Flags on `openshell-driver-applecontainer` (env fallback `OSHL_AC_<NAME>`, flag 
 | `--guest-tls-ca/cert/key` | gateway TLS state dir (`$OPENSHELL_LOCAL_TLS_DIR` honored) | client TLS triple handed to sandboxes |
 | `--namespace` | `default` | namespace reported on sandboxes |
 | `--cpus` / `--memory` | `2` / `2048` (MiB) | VM sizing when the request has no resources |
+| `--kernel` | (runtime default kernel) | host kernel path used for **every** sandbox VM — the fleet-wide Landlock escape hatch; per-sandbox driver config overrides it |
 | `--log-level` | `info` | driver log level and sandbox default |
 
 ## Per-sandbox driver config
@@ -145,7 +146,8 @@ Limits win over requests; Kubernetes quantity strings are accepted; apple/contai
 - **Landlock is absent from the default guest kernel** (kata-static 6.18.x:
   `CONFIG_SECURITY_LANDLOCK is not set`), so OpenShell filesystem policy degrades to
   `best_effort` (an alert is emitted in-guest; seccomp and the network policy proxy are
-  unaffected). Escape hatch: per-sandbox `kernel` passthrough with a Landlock-enabled build.
+  unaffected). Escape hatch: a Landlock-enabled kernel build, either fleet-wide via the
+  driver's `--kernel` flag or per sandbox via the driver-config `kernel` field.
 - **No host-side nftables defense layer** — that upstream mechanism is Linux-only. On macOS,
   vmnet NAT already blocks inbound traffic from off the Mac; a pf anchor reproducing the
   "guests may only reach the gateway port" rule is possible future work.
