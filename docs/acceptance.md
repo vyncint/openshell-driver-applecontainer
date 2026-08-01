@@ -211,6 +211,31 @@ top of the request — visible as nproc = requested + 1. Volume mounts default t
 reserved targets (`/opt/openshell`, `/etc/openshell`, `/etc/openshell-tls`, `/run/netns`,
 `/sandbox`, `/openshell-seed`) are rejected at validate time.
 
+## M6 — soak and shutdown
+
+Ten full lifecycle cycles against the live gateway (e2e/soak.sh):
+
+```
+soak: cycle 1/10: create->Ready 1.1s
+soak: cycle 2/10: create->Ready 1.1s
+…
+soak: cycle 10/10: create->Ready 1.1s
+soak: PASS (10 cycles, mean create->Ready 1.1s, no VMs leaked)
+```
+
+The 1.1 s is measured from `sandbox create` to the **public** `Ready` phase — VM boot plus
+supervisor mTLS dial-back plus gateway promotion — with a 0.5 s polling granularity. Each
+cycle also ran an exec and a delete; `container ls -a` was verified empty at the end.
+
+Graceful shutdown, observed at every driver restart during this work (SIGTERM → drain):
+
+```
+time=… level=INFO msg="shutting down, draining in-flight RPCs"
+```
+
+(When the long-lived gateway watch stream is open, the drain times out after 10 s and the
+server force-stops — by design.)
+
 ### Environment quirks found (and their fixes)
 
 1. The Homebrew installer registered the CLI gateway endpoint as `https://[::1]:17670`, but

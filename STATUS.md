@@ -14,9 +14,9 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 | M3 — first live sandbox | **done** | Live acceptance passed: create → phase Ready (supervisor mTLS dial-back from the VM), `sandbox exec` ran commands, forbidden egress blocked with HTTP 403 by the in-guest proxy, delete removed VM + record. Three real failures found and fixed on the way (image-ls schema, image USER vs boot shim, default OCI caps vs netns) — docs/acceptance.md. |
 | M4 — full lifecycle | **done** | Startup reconcile (adopt running / mark exited / fail missing / delete labeled orphans), 2 s runtime poller publishing transitions, delete with in-flight-create cancellation. Live: restart-adopt, out-of-band stop → Error phase, clean delete of adopted sandbox. |
 | M5 — images & resources | **done** | Local-first resolution, digest pinned at inspect time and booted by digest, cpu/memory quantity mapping to real VM sizing (live-verified in-guest: 3Gi + cpus, with apple/container's +1 cpuOverhead noted), driver-config-json schema (volume/tmpfs mounts with reserved-target enforcement, network override, kernel passthrough). |
-| M6 — hardening & docs | pending | |
-| CI | pending | |
-| Release v0.1.0 | pending | M2 acceptance passed live, so a release is warranted once CI is green. |
+| M6 — hardening & docs | **done** | Socket perms enforced + tested, graceful SIGTERM drain, 10-cycle soak: mean create→Ready **1.1 s**, zero leaked VMs. README (architecture, quickstart, config + driver-config reference, limitations, compatibility), docs/architecture.md, CONTRIBUTING, SECURITY, CHANGELOG. |
+| CI | **done** | First run green across all six jobs (lint, test ubuntu+macos, cross-build, commit-audit, govulncheck). e2e.yml is workflow_dispatch + self-hosted macOS only. |
+| Release v0.1.0 | in progress | M2/M3 acceptance passed live; goreleaser + release workflow, then tag. |
 
 ## Known quirks / risks
 
