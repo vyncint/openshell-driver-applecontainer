@@ -57,13 +57,20 @@ func run(args []string) error {
 	rt := backend.NewCLI(log)
 	srv := grpcsvc.New(cfg, rt, store, log, version)
 
-	// Reconcile persisted records against the runtime before serving, then
-	// keep conditions fresh with the runtime poller.
+	// Fail fast on configuration that can never work; reconcile persisted
+	// records against the runtime before serving; then keep conditions
+	// fresh with the runtime poller.
 	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 30*time.Second)
-	err = srv.Bootstrap(bootCtx)
+	err = grpcsvc.Preflight(bootCtx, cfg, rt, log)
+	if err == nil {
+		err = srv.Bootstrap(bootCtx)
+		if err != nil {
+			err = fmt.Errorf("startup reconcile: %w", err)
+		}
+	}
 	cancelBoot()
 	if err != nil {
-		return fmt.Errorf("startup reconcile: %w", err)
+		return err
 	}
 	srv.StartPoller()
 
