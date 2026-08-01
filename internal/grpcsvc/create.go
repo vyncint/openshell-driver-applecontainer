@@ -134,16 +134,21 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	rec := e.rec
 
 	// Image: local first, pull only when absent.
-	images, err := s.rt.ImageList(ctx)
-	if err != nil {
-		return fmt.Errorf("list images: %w", err)
-	}
-	present := false
-	for _, img := range images {
-		if img.Reference == rec.ImageRef {
-			present = true
-			break
+	findImage := func() (backend.Image, bool, error) {
+		images, err := s.rt.ImageList(ctx)
+		if err != nil {
+			return backend.Image{}, false, fmt.Errorf("list images: %w", err)
 		}
+		for _, img := range images {
+			if img.Reference == rec.ImageRef {
+				return img, true, nil
+			}
+		}
+		return backend.Image{}, false, nil
+	}
+	img, present, err := findImage()
+	if err != nil {
+		return err
 	}
 	if !present {
 		s.publishPlatformEvent(rec.ID, "Normal", "Pulling", "Pulling image "+rec.ImageRef)
@@ -151,6 +156,11 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 			return fmt.Errorf("pull image %s: %w", rec.ImageRef, err)
 		}
 		s.publishPlatformEvent(rec.ID, "Normal", "Pulled", "Pulled image "+rec.ImageRef)
+		if img, present, err = findImage(); err != nil {
+			return err
+		} else if !present {
+			return fmt.Errorf("image %s not present after pull", rec.ImageRef)
+		}
 	}
 
 	// Supervisor binary (cached per supervisor-image digest).
@@ -175,6 +185,9 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	if err != nil {
 		return fmt.Errorf("build environment: %w", err)
 	}
+	// The supervisor drops the workload to the image's intended user; it
+	// learns that identity from this variable (docker-driver parity).
+	env[envOCIImageUser] = img.User
 
 	labels := make(map[string]string)
 	for k, v := range sb.GetSpec().GetTemplate().GetLabels() {
@@ -195,6 +208,12 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// The boot shim and supervisor need guest root regardless of the
+	// image's USER; the workload later drops to the image user. The caps
+	// mirror the upstream docker driver: the guest init applies default
+	// OCI capabilities even for uid 0, and the supervisor's netns setup
+	// needs SYS_ADMIN and NET_ADMIN on top of them.
+	root := int64(0)
 	if _, err := s.rt.Run(ctx, backend.RunSpec{
 		Name:    rec.ContainerName,
 		Image:   rec.ImageRef,
@@ -209,6 +228,9 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		CPUs:       s.cfg.CPUs,
 		MemoryMB:   s.cfg.MemoryMB,
 		Entrypoint: seed.GuestSeedDir + "/boot.sh",
+		UID:        &root,
+		GID:        &root,
+		CapAdd:     []string{"CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_SYS_PTRACE", "CAP_SYSLOG"},
 	}); err != nil {
 		return fmt.Errorf("boot sandbox VM: %w", err)
 	}

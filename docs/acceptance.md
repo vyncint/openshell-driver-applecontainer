@@ -62,6 +62,79 @@ capabilities response — confirming the M1 reading of the default-image flow. T
 called `ValidateSandboxCreate` first (it passed) and rolled the store row back after the
 Unimplemented create, so `sandbox list` stays empty.
 
+## M3 — first live sandbox: create → Ready → exec → policy block → delete
+
+Same gateway/driver setup as M2 (driver now with provisioning). Full cycle, all live:
+
+```
+$ openshell sandbox create --name m3-first
+(driver log)
+… msg="create sandbox requested" sandbox_id=dea33106-7a22-449d-a933-02389d2533ff name=m3-first
+… msg=exec cmd="container run --detach --name oshl-dea33106-… --network oshl
+    --volume …/sandboxes/dea33106-…/seed:/openshell-seed:ro
+    --env HOME=/root --env OPENSHELL_ENDPOINT=https://192.168.65.1:17670
+    --env OPENSHELL_SANDBOX=m3-first --env OPENSHELL_SANDBOX_COMMAND=sleep infinity
+    --env OPENSHELL_SANDBOX_ID=dea33106-… --env OPENSHELL_SANDBOX_TOKEN_FILE=/openshell-seed/auth/sandbox.jwt
+    --env OPENSHELL_SSH_SOCKET_PATH=/run/openshell/ssh.sock
+    --env OPENSHELL_TLS_CA=/openshell-seed/tls/ca.crt … --env OPENSHELL_OCI_IMAGE_USER=sandbox
+    --label openshell.ai/managed-by=openshell-driver-applecontainer …
+    --cpus 2 --memory 2048M --uid 0 --gid 0
+    --cap-add CAP_SYS_ADMIN --cap-add CAP_NET_ADMIN --cap-add CAP_SYS_PTRACE --cap-add CAP_SYSLOG
+    --entrypoint /openshell-seed/boot.sh ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
+
+$ openshell sandbox list
+NAME      CREATED              PHASE
+m3-first  2026-08-01 16:54:14  Ready
+```
+
+`Ready` means the in-guest supervisor dialed the gateway over mTLS from the VM
+(guest console shows the TLS 1.3 handshakes against 192.168.65.1 and a steady-state
+session). Command execution and policy enforcement, via the OpenShell CLI:
+
+```
+$ openshell sandbox exec -n m3-first -- uname -a
+Linux oshl-dea33106-7a22-449d-a933-02389d2533ff 6.18.15 #1 SMP … aarch64 GNU/Linux
+
+$ openshell sandbox exec -n m3-first -- id
+uid=998(sandbox) gid=998(sandbox) groups=998(sandbox)
+
+$ openshell sandbox exec -n m3-first -- curl -sS -m 15 https://example.com
+curl: (56) CONNECT tunnel failed, response 403        # policy-forbidden action BLOCKED
+```
+
+The workload runs as the image's non-root user (the supervisor consumed
+`OPENSHELL_OCI_IMAGE_USER`), per-exec seccomp filters are visible in the console
+(`Blocking socket domain via seccomp`), and the forbidden egress is denied by the
+in-guest policy proxy with HTTP 403. Teardown:
+
+```
+$ openshell sandbox delete m3-first
+✓ Deleted sandbox m3-first
+$ container ls -a
+ID  IMAGE  OS  ARCH  STATE  IP  CPUS  MEMORY  STARTED     # empty
+$ openshell sandbox list
+No sandboxes found.
+```
+
+### Failures hit on the way (real, and what fixed them)
+
+1. `container image ls --format json` keeps the reference at `configuration.name`, not a
+   top-level `reference` — the image-presence check missed a local image ("not present
+   after pull"). Parser fixed against a captured fixture.
+2. First boot died instantly: `mkdir /opt/openshell: Permission denied`. The base image sets
+   `USER sandbox` and apple/container honors it for the entrypoint. Fix: run the boot shim
+   as guest root (`--uid 0 --gid 0`), docker-driver parity.
+3. Second boot: supervisor reached the gateway (provider env fetched over mTLS — proving the
+   whole vmnet/TLS/token path) then died on
+   `ip netns add … mount --make-shared /run/netns failed: Operation not permitted`.
+   apple/container's guest init applies default OCI capabilities even for uid 0. Fix:
+   `--cap-add CAP_SYS_ADMIN/CAP_NET_ADMIN/CAP_SYS_PTRACE/CAP_SYSLOG` (docker-driver parity).
+   With the caps in place the netns, proxy, and policy layers all came up.
+
+Note: an allowed-endpoint contrast probe (`curl https://api.anthropic.com/`) returned `000`
+rather than an HTTP status; the default policy's exact allowlist lives in the
+openshell-community image and is not verified in this tree, so no claim is made about it.
+
 ### Environment quirks found (and their fixes)
 
 1. The Homebrew installer registered the CLI gateway endpoint as `https://[::1]:17670`, but

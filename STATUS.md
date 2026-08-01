@@ -11,7 +11,7 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 | Gate 0 — prerequisites | **done** | G0.1 pass; G0.2 Landlock absent → best_effort (custom-kernel escape hatch documented); G0.3 pass (virtiofs ro, no noexec, exec bit preserved); G0.4 pass (base + supervisor images pull for arm64); G0.5 pass (guest→host vmnet TCP proven; gateway `bind_address`+`server_sans` confirmed in source); G0.6 pass. Transcripts in docs/gate0.md. |
 | M1 — contract recon | **done** | docs/CONTRACT.md; protos vendored (Apache-2.0, NOTICE); Go stubs via pinned buf plugins. 8 RPCs — kill criterion not triggered. |
 | M2 — hello driver | **done** | Unit tests green (`go test -race`), socket 0700/0600, live acceptance passed: gateway selected `applecontainer` (in_tree=false), CLI authenticated, `sandbox create` reached our CreateSandbox. Transcript in docs/acceptance.md. |
-| M3 — first live sandbox | in progress | Seed dir, supervisor extraction+cache, boot shim, live create→exec→policy-block acceptance. |
+| M3 — first live sandbox | **done** | Live acceptance passed: create → phase Ready (supervisor mTLS dial-back from the VM), `sandbox exec` ran commands, forbidden egress blocked with HTTP 403 by the in-guest proxy, delete removed VM + record. Three real failures found and fixed on the way (image-ls schema, image USER vs boot shim, default OCI caps vs netns) — docs/acceptance.md. |
 | M4 — full lifecycle | pending | |
 | M5 — images & resources | pending | |
 | M6 — hardening & docs | pending | |

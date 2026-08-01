@@ -8,6 +8,8 @@ import (
 	"testing"
 )
 
+func ptrInt64(v int64) *int64 { return &v }
+
 func TestRunArgs(t *testing.T) {
 	tests := []struct {
 		name string
@@ -66,6 +68,20 @@ func TestRunArgs(t *testing.T) {
 				"run", "--detach", "--name", "oshl-k",
 				"--kernel", "/opt/kernels/landlock-6.18",
 				"img:1", "--flag", "v",
+			},
+		},
+		{
+			name: "root uid gid override",
+			spec: RunSpec{
+				Name:  "oshl-r",
+				Image: "img:1",
+				UID:   ptrInt64(0),
+				GID:   ptrInt64(0),
+			},
+			want: []string{
+				"run", "--detach", "--name", "oshl-r",
+				"--uid", "0", "--gid", "0",
+				"img:1",
 			},
 		},
 	}
@@ -213,6 +229,40 @@ func TestCLIGet(t *testing.T) {
 	want := []string{"container", "ls", "--all", "--format", "json"}
 	if !reflect.DeepEqual(rr.calls[0], want) {
 		t.Errorf("argv = %q, want %q", rr.calls[0], want)
+	}
+}
+
+// imageLsFixture is a trimmed real capture of `container image ls --format
+// json` from apple/container 1.2.0 — the reference lives at
+// configuration.name, not at a top-level reference field.
+const imageLsFixture = `[
+  {
+    "configuration": {
+      "creationDate": "2026-07-31T15:10:14Z",
+      "descriptor": {
+        "digest": "sha256:eca343a8a4ffb874ba6256ebd3a12f7e1f9f186e1b3518bfafd6fd2b68670a62",
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "size": 645
+      },
+      "name": "ghcr.io/nvidia/openshell/supervisor:0.0.96"
+    },
+    "id": "eca343a8a4ffb874ba6256ebd3a12f7e1f9f186e1b3518bfafd6fd2b68670a62"
+  }
+]`
+
+func TestParseImageList(t *testing.T) {
+	got, err := ParseImageList([]byte(imageLsFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 image, got %d", len(got))
+	}
+	if got[0].Reference != "ghcr.io/nvidia/openshell/supervisor:0.0.96" {
+		t.Errorf("reference = %q", got[0].Reference)
+	}
+	if !strings.HasPrefix(got[0].Digest, "sha256:eca343a8") {
+		t.Errorf("digest = %q", got[0].Digest)
 	}
 }
 

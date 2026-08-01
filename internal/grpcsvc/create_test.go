@@ -55,7 +55,7 @@ func newLiveServer(t *testing.T, fake *backend.Fake) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake.AddImage(testImage, "sha256:baseimg")
+	fake.AddImageWithUser(testImage, "sha256:baseimg", "sandbox")
 	fake.AddImage(testSupImage, "sha256:supimg")
 	srv := New(cfg, fake, store, slog.Default(), "test")
 	t.Cleanup(srv.Close)
@@ -164,6 +164,12 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 	}
 	if _, ok := env["OPENSHELL_SANDBOX_TOKEN"]; ok {
 		t.Error("raw token must never be in env")
+	}
+	if env["OPENSHELL_OCI_IMAGE_USER"] != "sandbox" {
+		t.Errorf("oci image user = %q, want image's USER", env["OPENSHELL_OCI_IMAGE_USER"])
+	}
+	if boot.UID == nil || *boot.UID != 0 || boot.GID == nil || *boot.GID != 0 {
+		t.Errorf("boot must run as guest root, got uid=%v gid=%v", boot.UID, boot.GID)
 	}
 	if !strings.Contains(env["OPENSHELL_USER_ENVIRONMENT"], "from-spec") {
 		t.Errorf("user environment json = %q", env["OPENSHELL_USER_ENVIRONMENT"])

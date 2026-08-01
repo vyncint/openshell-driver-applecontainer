@@ -44,6 +44,13 @@ func (f *Fake) AddImage(ref, digest string) {
 	f.images = append(f.images, Image{Reference: ref, Digest: digest})
 }
 
+// AddImageWithUser registers a locally available image with an OCI USER.
+func (f *Fake) AddImageWithUser(ref, digest, user string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.images = append(f.images, Image{Reference: ref, Digest: digest, User: user})
+}
+
 // RunCalls returns a copy of every RunSpec passed to Run.
 func (f *Fake) RunCalls() []RunSpec {
 	f.mu.Lock()

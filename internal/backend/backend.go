@@ -32,6 +32,13 @@ type RunSpec struct {
 	Entrypoint string // optional entrypoint override
 	Args       []string
 	Kernel     string // optional custom kernel path (container run -k)
+	// UID/GID override the image's USER for the init process. The
+	// supervisor must run as guest root regardless of the image user.
+	UID *int64
+	GID *int64
+	// CapAdd extends the default OCI capability set. Even as uid 0 the
+	// guest init applies default caps, which exclude SYS_ADMIN/NET_ADMIN.
+	CapAdd []string
 }
 
 // NetworkAttachment is one network interface of a running container.
@@ -77,6 +84,8 @@ func (c Container) IPv4() string {
 type Image struct {
 	Reference string
 	Digest    string
+	// User is the OCI config USER of the platform variant ("" when unset).
+	User string
 }
 
 // Runtime is the complete surface of the apple/container CLI used by the

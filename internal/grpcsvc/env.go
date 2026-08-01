@@ -25,6 +25,7 @@ const (
 	envTLSCert          = "OPENSHELL_TLS_CERT"
 	envTLSKey           = "OPENSHELL_TLS_KEY"
 	envTokenFile        = "OPENSHELL_SANDBOX_TOKEN_FILE"
+	envOCIImageUser     = "OPENSHELL_OCI_IMAGE_USER"
 
 	guestTLSCA     = seed.GuestSeedDir + "/tls/ca.crt"
 	guestTLSCert   = seed.GuestSeedDir + "/tls/tls.crt"

@@ -104,6 +104,15 @@ func RunArgs(spec RunSpec) []string {
 	if spec.MemoryMB > 0 {
 		args = append(args, "--memory", strconv.FormatInt(spec.MemoryMB, 10)+"M")
 	}
+	if spec.UID != nil {
+		args = append(args, "--uid", strconv.FormatInt(*spec.UID, 10))
+	}
+	if spec.GID != nil {
+		args = append(args, "--gid", strconv.FormatInt(*spec.GID, 10))
+	}
+	for _, c := range spec.CapAdd {
+		args = append(args, "--cap-add", c)
+	}
 	if spec.Kernel != "" {
 		args = append(args, "--kernel", spec.Kernel)
 	}
@@ -234,12 +243,37 @@ func (c *CLI) Get(ctx context.Context, name string) (Container, error) {
 	return Container{}, fmt.Errorf("%w: container %q", ErrNotFound, name)
 }
 
-// imageEntry mirrors the subset of `container image ls --format json` used.
+// imageEntry mirrors the subset of `container image ls --format json` used:
+// the reference lives at configuration.name, and the OCI config (USER) in
+// per-platform variants.
 type imageEntry struct {
-	Reference  string `json:"reference"`
-	Descriptor struct {
-		Digest string `json:"digest"`
-	} `json:"descriptor"`
+	Configuration struct {
+		Name       string `json:"name"`
+		Descriptor struct {
+			Digest string `json:"digest"`
+		} `json:"descriptor"`
+	} `json:"configuration"`
+	Variants []struct {
+		Config struct {
+			Architecture string `json:"architecture"`
+			Config       struct {
+				User string `json:"User"`
+			} `json:"config"`
+		} `json:"config"`
+	} `json:"variants"`
+}
+
+func (e imageEntry) user() string {
+	fallback := ""
+	for i, v := range e.Variants {
+		if v.Config.Architecture == "arm64" {
+			return v.Config.Config.User
+		}
+		if i == 0 {
+			fallback = v.Config.Config.User
+		}
+	}
+	return fallback
 }
 
 // ParseImageList decodes `container image ls --format json` output.
@@ -250,7 +284,11 @@ func ParseImageList(data []byte) ([]Image, error) {
 	}
 	out := make([]Image, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, Image{Reference: e.Reference, Digest: e.Descriptor.Digest})
+		out = append(out, Image{
+			Reference: e.Configuration.Name,
+			Digest:    e.Configuration.Descriptor.Digest,
+			User:      e.user(),
+		})
 	}
 	return out, nil
 }
