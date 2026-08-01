@@ -104,6 +104,20 @@ func (s *Server) validateSandbox(sb *computev1.DriverSandbox) error {
 	if gpu := sb.GetSpec().GetResourceRequirements().GetGpu(); gpu != nil {
 		return status.Error(codes.InvalidArgument, "gpu sandboxes are not supported by the applecontainer driver")
 	}
+	if _, err := parseDriverConfig(sb.GetSpec().GetTemplate().GetDriverConfig()); err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	res := sb.GetSpec().GetTemplate().GetResources()
+	for _, q := range []string{res.GetCpuRequest(), res.GetCpuLimit()} {
+		if _, err := ParseCPUQuantity(q); err != nil {
+			return status.Error(codes.InvalidArgument, err.Error())
+		}
+	}
+	for _, q := range []string{res.GetMemoryRequest(), res.GetMemoryLimit()} {
+		if _, err := ParseMemoryQuantityMB(q); err != nil {
+			return status.Error(codes.InvalidArgument, err.Error())
+		}
+	}
 	return nil
 }
 

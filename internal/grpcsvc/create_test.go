@@ -127,8 +127,9 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 	if boot == nil {
 		t.Fatalf("no boot run call found in %+v", calls)
 	}
-	if boot.Image != testImage || boot.Network != "oshl" {
-		t.Errorf("boot image/network = %q/%q", boot.Image, boot.Network)
+	wantPinned := "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:baseimg"
+	if boot.Image != wantPinned || boot.Network != "oshl" {
+		t.Errorf("boot image/network = %q/%q, want %q/oshl", boot.Image, boot.Network, wantPinned)
 	}
 	if boot.Entrypoint != "/openshell-seed/boot.sh" {
 		t.Errorf("entrypoint = %q", boot.Entrypoint)
@@ -225,6 +226,102 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 	got := resp.GetSandboxes()[0]
 	if got.GetStatus().GetConditions()[0].GetStatus() != "True" {
 		t.Errorf("condition = %+v", got.GetStatus().GetConditions()[0])
+	}
+}
+
+func TestCreateSandboxAppliesDriverConfigAndResources(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	client := dialTestServer(t, srv)
+
+	kernelPath := filepath.Join(t.TempDir(), "vmlinux")
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := createRequest()
+	req.Sandbox.Spec.Template.Resources = &computev1.DriverResourceRequirements{
+		CpuLimit:      "3",
+		MemoryRequest: "4Gi",
+	}
+	req.Sandbox.Spec.Template.DriverConfig = mustStruct(t, map[string]any{
+		"network": "othernet",
+		"kernel":  kernelPath,
+		"mounts": []any{
+			map[string]any{"type": "volume", "source": "/Users/x/data", "target": "/data"},
+			map[string]any{"type": "tmpfs", "target": "/scratch"},
+		},
+	})
+
+	if _, err := client.CreateSandbox(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, srv, reasonBackendReady)
+
+	calls := fake.RunCalls()
+	boot := calls[len(calls)-1]
+	if boot.Name != "oshl-"+testSandboxID {
+		t.Fatalf("last run call = %+v", boot)
+	}
+	if boot.CPUs != 3 || boot.MemoryMB != 4096 {
+		t.Errorf("resources = %d cpu / %d MB, want 3/4096", boot.CPUs, boot.MemoryMB)
+	}
+	if boot.Network != "othernet" {
+		t.Errorf("network = %q", boot.Network)
+	}
+	if boot.Kernel != kernelPath {
+		t.Errorf("kernel = %q", boot.Kernel)
+	}
+	if !strings.HasPrefix(boot.Image, "ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:") {
+		t.Errorf("image not digest-pinned: %q", boot.Image)
+	}
+	if len(boot.Volumes) != 2 || boot.Volumes[1].GuestPath != "/data" || !boot.Volumes[1].ReadOnly {
+		t.Errorf("volumes = %+v", boot.Volumes)
+	}
+	if len(boot.Tmpfs) != 1 || boot.Tmpfs[0] != "/scratch" {
+		t.Errorf("tmpfs = %+v", boot.Tmpfs)
+	}
+
+	// The pinned digest is persisted for reconcile.
+	rec, err := srv.store.Load(testSandboxID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.ImageDigest != "sha256:baseimg" {
+		t.Errorf("persisted digest = %q", rec.ImageDigest)
+	}
+}
+
+func TestValidateRejectsBadDriverConfigAndResources(t *testing.T) {
+	client := dialTestServer(t, newTestServer(t))
+	ctx := context.Background()
+
+	badMount := createRequest()
+	badMount.Sandbox.Spec.Template.DriverConfig = mustStruct(t, map[string]any{
+		"mounts": []any{map[string]any{"type": "volume", "source": "/tmp/x", "target": "/sandbox"}},
+	})
+	if _, err := client.ValidateSandboxCreate(ctx, &computev1.ValidateSandboxCreateRequest{Sandbox: badMount.Sandbox}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("reserved mount target: want InvalidArgument, got %v", err)
+	}
+
+	badRes := createRequest()
+	badRes.Sandbox.Spec.Template.Resources = &computev1.DriverResourceRequirements{CpuLimit: "many"}
+	if _, err := client.ValidateSandboxCreate(ctx, &computev1.ValidateSandboxCreateRequest{Sandbox: badRes.Sandbox}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("bad cpu quantity: want InvalidArgument, got %v", err)
+	}
+}
+
+func TestRefWithDigest(t *testing.T) {
+	tests := []struct{ ref, digest, want string }{
+		{"ghcr.io/a/b:latest", "sha256:x", "ghcr.io/a/b@sha256:x"},
+		{"ghcr.io/a/b", "sha256:x", "ghcr.io/a/b@sha256:x"},
+		{"registry:5000/a/b:1.0", "sha256:x", "registry:5000/a/b@sha256:x"},
+		{"ghcr.io/a/b@sha256:y", "sha256:x", "ghcr.io/a/b@sha256:y"},
+	}
+	for _, tt := range tests {
+		if got := refWithDigest(tt.ref, tt.digest); got != tt.want {
+			t.Errorf("refWithDigest(%q) = %q, want %q", tt.ref, got, tt.want)
+		}
 	}
 }
 

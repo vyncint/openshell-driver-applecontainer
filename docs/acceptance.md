@@ -179,6 +179,38 @@ Double-create (AlreadyExists) and delete-mid-create (provisioning cancellation w
 cleanup) are covered by unit tests against the fake runtime; orphaned-VM cleanup and
 record-without-VM marking are covered by bootstrap reconcile tests.
 
+## M5 — digest pinning, resource mapping, driver-config-json
+
+```
+$ openshell sandbox create --name m5-live --cpu 3 --memory 3Gi \
+    --driver-config-json '{"applecontainer":{"mounts":[
+      {"type":"tmpfs","target":"/scratch"},
+      {"type":"volume","source":"/tmp/oshl-ac/m5data","target":"/data"}]}}' -- true
+
+(driver log, boot argv — image pinned to the digest observed at inspect time)
+… container run … --cpus 3 --memory 3072M --tmpfs /scratch
+    --volume /tmp/oshl-ac/m5data:/data:ro …
+    ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e…
+
+$ openshell sandbox exec -n m5-live -- sh -c '…'
+cpus=4                                        # 3 requested + apple/container cpuOverhead: 1
+tmpfs /scratch tmpfs rw,relatime 0 0
+virtiofs /data virtiofs ro,relatime 0 0
+m5-test-content                               # host file visible
+touch: cannot touch '/data/w': Read-only file system
+Mem:            3058 …                        # 3Gi applied
+
+$ container ls --format json | …
+oshl-17c1ccb2-… {'cpuOverhead': 1, 'cpus': 3, 'memoryInBytes': 3221225472}
+```
+
+Unlike the upstream VM driver (which accepts-but-ignores cpu/memory), requests map to real
+VM sizing: `cpu_limit`/`cpu_request` → `--cpus` (Kubernetes quantities, rounded up),
+`memory_limit`/`memory_request` → `--memory`. apple/container adds one `cpuOverhead` vCPU on
+top of the request — visible as nproc = requested + 1. Volume mounts default to read-only;
+reserved targets (`/opt/openshell`, `/etc/openshell`, `/etc/openshell-tls`, `/run/netns`,
+`/sandbox`, `/openshell-seed`) are rejected at validate time.
+
 ### Environment quirks found (and their fixes)
 
 1. The Homebrew installer registered the CLI gateway endpoint as `https://[::1]:17670`, but

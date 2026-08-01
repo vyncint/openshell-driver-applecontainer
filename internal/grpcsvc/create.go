@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -133,6 +135,11 @@ func (s *Server) provision(ctx context.Context, e *entry, sb *computev1.DriverSa
 func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.DriverSandbox, token string) error {
 	rec := e.rec
 
+	dcfg, err := parseDriverConfig(sb.GetSpec().GetTemplate().GetDriverConfig())
+	if err != nil {
+		return err
+	}
+
 	// Image: local first, pull only when absent.
 	findImage := func() (backend.Image, bool, error) {
 		images, err := s.rt.ImageList(ctx)
@@ -160,6 +167,21 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 			return err
 		} else if !present {
 			return fmt.Errorf("image %s not present after pull", rec.ImageRef)
+		}
+	}
+
+	// Pin the digest observed at inspect time and boot strictly by it, so
+	// a tag moving between now and the run cannot swap the image (podman
+	// driver parity). The pinned identity is persisted for reconcile.
+	runImage := rec.ImageRef
+	if img.Digest != "" {
+		runImage = refWithDigest(rec.ImageRef, img.Digest)
+		s.mu.Lock()
+		e.rec.ImageDigest = img.Digest
+		rec = e.rec
+		s.mu.Unlock()
+		if err := s.store.Save(rec); err != nil {
+			return fmt.Errorf("persist pinned digest: %w", err)
 		}
 	}
 
@@ -199,6 +221,53 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	labels[labelNamespace] = rec.Namespace
 	labels[labelWorkspace] = rec.Workspace
 
+	// Sizing: request-supplied resources win; the driver config is the
+	// fallback. Limits take precedence over requests.
+	res := sb.GetSpec().GetTemplate().GetResources()
+	cpus, err := firstQuantity(ParseCPUQuantity, res.GetCpuLimit(), res.GetCpuRequest())
+	if err != nil {
+		return err
+	}
+	if cpus == 0 {
+		cpus = s.cfg.CPUs
+	}
+	memMB, err := firstQuantity(ParseMemoryQuantityMB, res.GetMemoryLimit(), res.GetMemoryRequest())
+	if err != nil {
+		return err
+	}
+	if memMB == 0 {
+		memMB = s.cfg.MemoryMB
+	}
+
+	network := s.cfg.Network
+	if dcfg.Network != "" {
+		network = dcfg.Network
+	}
+	if dcfg.Kernel != "" {
+		if _, err := os.Stat(dcfg.Kernel); err != nil {
+			return fmt.Errorf("custom kernel: %w", err)
+		}
+	}
+
+	volumes := []backend.VolumeMount{{
+		HostPath:  seedDir,
+		GuestPath: seed.GuestSeedDir,
+		ReadOnly:  true,
+	}}
+	var tmpfs []string
+	for _, m := range dcfg.Mounts {
+		switch m.Type {
+		case "volume":
+			volumes = append(volumes, backend.VolumeMount{
+				HostPath:  m.Source,
+				GuestPath: m.Target,
+				ReadOnly:  m.readOnly(),
+			})
+		case "tmpfs":
+			tmpfs = append(tmpfs, m.Target)
+		}
+	}
+
 	// container run is not idempotent for an existing name: always clear
 	// any leftover VM with our name first.
 	if err := s.rt.Delete(ctx, rec.ContainerName); err != nil && !errors.Is(err, backend.ErrNotFound) {
@@ -215,19 +284,17 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	// needs SYS_ADMIN and NET_ADMIN on top of them.
 	root := int64(0)
 	if _, err := s.rt.Run(ctx, backend.RunSpec{
-		Name:    rec.ContainerName,
-		Image:   rec.ImageRef,
-		Network: s.cfg.Network,
-		Volumes: []backend.VolumeMount{{
-			HostPath:  seedDir,
-			GuestPath: seed.GuestSeedDir,
-			ReadOnly:  true,
-		}},
+		Name:       rec.ContainerName,
+		Image:      runImage,
+		Network:    network,
+		Volumes:    volumes,
+		Tmpfs:      tmpfs,
 		Env:        env,
 		Labels:     labels,
-		CPUs:       s.cfg.CPUs,
-		MemoryMB:   s.cfg.MemoryMB,
+		CPUs:       cpus,
+		MemoryMB:   memMB,
 		Entrypoint: seed.GuestSeedDir + "/boot.sh",
+		Kernel:     dcfg.Kernel,
 		UID:        &root,
 		GID:        &root,
 		CapAdd:     []string{"CAP_SYS_ADMIN", "CAP_NET_ADMIN", "CAP_SYS_PTRACE", "CAP_SYSLOG"},
@@ -235,6 +302,34 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		return fmt.Errorf("boot sandbox VM: %w", err)
 	}
 	return nil
+}
+
+// firstQuantity parses candidates in order and returns the first non-zero
+// value.
+func firstQuantity(parse func(string) (int64, error), candidates ...string) (int64, error) {
+	for _, c := range candidates {
+		v, err := parse(c)
+		if err != nil {
+			return 0, err
+		}
+		if v > 0 {
+			return v, nil
+		}
+	}
+	return 0, nil
+}
+
+// refWithDigest pins an image reference to a digest, dropping any tag
+// (name:tag@digest and name@digest resolve identically; the digest rules).
+func refWithDigest(ref, digest string) string {
+	if strings.Contains(ref, "@") {
+		return ref
+	}
+	name := ref
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		name = ref[:i]
+	}
+	return name + "@" + digest
 }
 
 // DeleteSandbox tears the VM down. A delete racing an in-flight create
