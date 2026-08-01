@@ -49,6 +49,10 @@ func readyTrueCondition() condition {
 	return condition{Status: "True", Reason: reasonBackendReady, Message: "Sandbox VM is running", At: time.Now()}
 }
 
+func exitedCondition() condition {
+	return condition{Status: "False", Reason: reasonContainerExited, Message: "Sandbox VM is not running", At: time.Now()}
+}
+
 func failedCondition(msg string) condition {
 	return condition{Status: "False", Reason: reasonProvisioningFailed, Message: msg, At: time.Now()}
 }

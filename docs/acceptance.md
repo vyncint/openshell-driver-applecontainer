@@ -135,6 +135,50 @@ Note: an allowed-endpoint contrast probe (`curl https://api.anthropic.com/`) ret
 rather than an HTTP status; the default policy's exact allowlist lives in the
 openshell-community image and is not verified in this tree, so no claim is made about it.
 
+## M4 — lifecycle: restart adopt, exit detection, delete
+
+apple/container VMs are owned by the system apiserver, so they keep running when the driver
+dies — verified, and the basis for adopt-style reconcile (the upstream libkrun driver instead
+re-launches, because its VMs die with it):
+
+```
+$ pkill -f openshell-driver-applecontainer ; container ls | grep -c oshl-
+1                                            # VM alive with the driver gone
+$ ./bin/openshell-driver-applecontainer …    # restart
+(driver log)
+… msg="reconciled sandbox record" sandbox_id=819b3176-… container=oshl-819b3176-…
+    status=True reason=BackendReady          # adopted as Ready
+$ openshell sandbox list
+m4-adopt  2026-08-01 17:02:52  Ready
+```
+
+Out-of-band VM death is observed by the 2 s runtime poller and propagated through the watch
+stream to the public phase:
+
+```
+$ container stop oshl-819b3176-…
+(driver log)
+… msg="sandbox state transition" sandbox_id=819b3176-… status=False reason=ContainerExited
+$ openshell sandbox list
+m4-adopt  2026-08-01 17:02:52  Error
+```
+
+Deleting the adopted (now stopped) sandbox removes VM, record, and state dir:
+
+```
+$ openshell sandbox delete m4-adopt
+✓ Deleted sandbox m4-adopt
+$ container ls -a            # empty
+$ openshell sandbox list
+No sandboxes found.
+$ ls ~/.local/state/openshell-applecontainer/sandboxes/ | wc -l
+0
+```
+
+Double-create (AlreadyExists) and delete-mid-create (provisioning cancellation with full
+cleanup) are covered by unit tests against the fake runtime; orphaned-VM cleanup and
+record-without-VM marking are covered by bootstrap reconcile tests.
+
 ### Environment quirks found (and their fixes)
 
 1. The Homebrew installer registered the CLI gateway endpoint as `https://[::1]:17670`, but
