@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestPreflightRejectsLoopbackEndpoint(t *testing.T) {
 		t.Run(ep, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.GRPCEndpoint = ep
-			err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default())
+			err := Preflight(context.Background(), &cfg, &backend.Fake{}, slog.Default())
 			if err == nil || !strings.Contains(err.Error(), "loopback") {
 				t.Errorf("want loopback error, got %v", err)
 			}
@@ -40,10 +39,52 @@ func TestPreflightRejectsInvalidEndpoint(t *testing.T) {
 		t.Run(ep, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.GRPCEndpoint = ep
-			if err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default()); err == nil {
+			if err := Preflight(context.Background(), &cfg, &backend.Fake{}, slog.Default()); err == nil {
 				t.Errorf("endpoint %q must fail preflight", ep)
 			}
 		})
+	}
+}
+
+func TestPreflightDerivesEndpointFromNetwork(t *testing.T) {
+	fake := &backend.Fake{}
+	fake.AddNetwork(backend.Network{Name: "oshl", IPv4Gateway: "192.168.65.1", IPv4Subnet: "192.168.65.0/24"})
+	cfg := testConfig()
+	cfg.GRPCEndpoint = ""
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GRPCEndpoint != "https://192.168.65.1:17670" {
+		t.Errorf("derived endpoint = %q", cfg.GRPCEndpoint)
+	}
+}
+
+func TestPreflightDerivesEndpointAfterCreatingNetwork(t *testing.T) {
+	fake := &backend.Fake{} // no networks yet: preflight must create, then derive
+	cfg := testConfig()
+	cfg.GRPCEndpoint = ""
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GRPCEndpoint != "https://192.168.65.1:17670" {
+		t.Errorf("derived endpoint = %q", cfg.GRPCEndpoint)
+	}
+	nets, err := fake.Networks(context.Background())
+	if err != nil || len(nets) != 1 || nets[0].Name != cfg.Network {
+		t.Errorf("network not created: %v, %v", nets, err)
+	}
+}
+
+func TestPreflightExplicitEndpointBeatsDerivation(t *testing.T) {
+	fake := &backend.Fake{}
+	fake.AddNetwork(backend.Network{Name: "oshl", IPv4Gateway: "192.168.65.1"})
+	cfg := testConfig()
+	cfg.GRPCEndpoint = "https://10.1.2.3:17670"
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GRPCEndpoint != "https://10.1.2.3:17670" {
+		t.Errorf("explicit endpoint overwritten: %q", cfg.GRPCEndpoint)
 	}
 }
 
@@ -51,7 +92,6 @@ func TestPreflightAcceptsRoutableEndpointAndEnsuresNetwork(t *testing.T) {
 	fake := &backend.Fake{}
 	cfg := testConfig()
 	cfg.GRPCEndpoint = "https://192.168.65.1:17670"
-	// TLS files exist for this case.
 	dir := t.TempDir()
 	for _, name := range []string{"ca.crt", "tls.crt", "tls.key"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o600); err != nil {
@@ -62,54 +102,58 @@ func TestPreflightAcceptsRoutableEndpointAndEnsuresNetwork(t *testing.T) {
 	cfg.GuestTLSCert = filepath.Join(dir, "tls.crt")
 	cfg.GuestTLSKey = filepath.Join(dir, "tls.key")
 
-	if err := Preflight(context.Background(), cfg, fake, slog.Default()); err != nil {
+	countNetwork := func() int {
+		nets, err := fake.Networks(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, net := range nets {
+			if net.Name == cfg.Network {
+				n++
+			}
+		}
+		return n
+	}
+
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
-	nets, err := fake.NetworkList(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(nets, cfg.Network) {
-		t.Errorf("network %q not auto-created: %v", cfg.Network, nets)
+	if got := countNetwork(); got != 1 {
+		t.Errorf("network %q auto-created %d times, want 1", cfg.Network, got)
 	}
 
 	// Second run: network exists, no duplicate creation.
-	if err := Preflight(context.Background(), cfg, fake, slog.Default()); err != nil {
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
-	nets, _ = fake.NetworkList(context.Background())
-	count := 0
-	for _, n := range nets {
-		if n == cfg.Network {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("network created %d times", count)
+	if got := countNetwork(); got != 1 {
+		t.Errorf("network created %d times", got)
 	}
 }
 
-func TestPreflightToleratesEmptyEndpointAndMissingTLS(t *testing.T) {
+func TestPreflightToleratesMissingTLS(t *testing.T) {
 	cfg := testConfig()
-	cfg.GRPCEndpoint = "" // warn only
-	if err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default()); err != nil {
-		t.Errorf("empty endpoint must not fail preflight: %v", err)
-	}
-
 	cfg.GRPCEndpoint = "https://192.168.65.1:17670"
 	cfg.GuestTLSCA = "/nonexistent/ca.crt"
 	cfg.GuestTLSCert = "/nonexistent/tls.crt"
 	cfg.GuestTLSKey = "/nonexistent/tls.key"
-	if err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default()); err != nil {
+	if err := Preflight(context.Background(), &cfg, &backend.Fake{}, slog.Default()); err != nil {
 		t.Errorf("missing TLS files must warn, not fail: %v", err)
 	}
 }
 
 func TestPreflightToleratesUnreachableRuntime(t *testing.T) {
+	// Networks keeps failing even after the SystemStart attempt; preflight
+	// must warn and continue with an empty endpoint (creates fail later
+	// with FailedPrecondition), never error at startup.
 	fake := &backend.Fake{NetworkListError: context.DeadlineExceeded}
 	cfg := testConfig()
-	cfg.GRPCEndpoint = "http://192.168.65.1:17670"
-	if err := Preflight(context.Background(), cfg, fake, slog.Default()); err != nil {
+	cfg.GRPCEndpoint = ""
+	if err := Preflight(context.Background(), &cfg, fake, slog.Default()); err != nil {
 		t.Errorf("unreachable runtime must warn, not fail: %v", err)
+	}
+	if cfg.GRPCEndpoint != "" {
+		t.Errorf("endpoint should stay empty when underivable, got %q", cfg.GRPCEndpoint)
 	}
 }

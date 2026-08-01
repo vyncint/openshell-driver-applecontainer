@@ -17,6 +17,8 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 | M6 — hardening & docs | **done** | Socket perms enforced + tested, graceful SIGTERM drain, 10-cycle soak: mean create→Ready **1.1 s**, zero leaked VMs. README (architecture, quickstart, config + driver-config reference, limitations, compatibility), docs/architecture.md, CONTRIBUTING, SECURITY, CHANGELOG. |
 | CI | **done** | First run green across all six jobs (lint, test ubuntu+macos, cross-build, commit-audit, govulncheck). e2e.yml is workflow_dispatch + self-hosted macOS only. |
 | Release v0.1.0 | **done** | Tag `v0.1.0` pushed; release workflow green; assets published (`openshell-driver-applecontainer_0.1.0_darwin_arm64.tar.gz`, `checksums.txt`). |
+| Risk-fix round | **done** | Issues #1–#3 fixed and merged (console-tail diagnostics, startup preflight, driver-level kernel). |
+| One-command setup | **done** | `setup`/`uninstall` subcommands: launchd driver service, stock Homebrew gateway service wired via gateway.env, cert SAN, endpoint auto-derivation, image pre-pull. Live-verified including uninstall→setup round trip and KeepAlive restart. README rewritten quickstart-first. |
 
 ## Known quirks / risks
 

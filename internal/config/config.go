@@ -82,20 +82,36 @@ func defaultStateDir() string {
 	return filepath.Join(home, ".local", "state", "openshell-applecontainer")
 }
 
-// defaultGuestTLSDir mirrors the gateway's local TLS state location
-// ($XDG_STATE_HOME/openshell/tls) where generate-certs writes the bundle.
+// homebrewGatewayTLSDir is where the Homebrew openshell formula's
+// post-install generates the gateway PKI.
+const homebrewGatewayTLSDir = "/opt/homebrew/var/openshell/tls"
+
+// defaultGuestTLSDir finds the gateway's TLS bundle: an explicit
+// OPENSHELL_LOCAL_TLS_DIR wins, then the first existing of the XDG state
+// location and the Homebrew install location, falling back to the XDG path
+// (so warnings name where the bundle is expected).
 func defaultGuestTLSDir() string {
 	if v := os.Getenv("OPENSHELL_LOCAL_TLS_DIR"); v != "" {
 		return v
 	}
+	xdg := ""
 	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
-		return filepath.Join(v, "openshell", "tls")
+		xdg = filepath.Join(v, "openshell", "tls")
+	} else if home, err := os.UserHomeDir(); err == nil {
+		xdg = filepath.Join(home, ".local", "state", "openshell", "tls")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
+	for _, dir := range []string{xdg, homebrewGatewayTLSDir} {
+		if dir == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "ca.crt")); err == nil {
+			return dir
+		}
 	}
-	return filepath.Join(home, ".local", "state", "openshell", "tls")
+	if xdg != "" {
+		return xdg
+	}
+	return homebrewGatewayTLSDir
 }
 
 // Parse resolves configuration from args (excluding argv[0]) and the
@@ -109,7 +125,7 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.Network, "network", envOr("NETWORK", "oshl"), "vmnet network sandbox VMs attach to")
 	fs.StringVar(&cfg.DefaultImage, "default-image", envOr("DEFAULT_IMAGE", "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"), "default sandbox image")
 	fs.StringVar(&cfg.SupervisorImage, "supervisor-image", envOr("SUPERVISOR_IMAGE", "ghcr.io/nvidia/openshell/supervisor:0.0.96"), "image the openshell-sandbox supervisor binary is extracted from")
-	fs.StringVar(&cfg.GRPCEndpoint, "grpc-endpoint", envOr("GRPC_ENDPOINT", ""), "gateway endpoint reachable from guest VMs (e.g. https://192.168.65.1:17670)")
+	fs.StringVar(&cfg.GRPCEndpoint, "grpc-endpoint", envOr("GRPC_ENDPOINT", ""), "gateway endpoint reachable from guest VMs; auto-derived from the vmnet network's gateway address when unset")
 	fs.StringVar(&cfg.GuestTLSCA, "guest-tls-ca", envOr("GUEST_TLS_CA", filepath.Join(tlsDir, "ca.crt")), "gateway CA certificate handed to sandboxes")
 	fs.StringVar(&cfg.GuestTLSCert, "guest-tls-cert", envOr("GUEST_TLS_CERT", filepath.Join(tlsDir, "client", "tls.crt")), "shared client certificate handed to sandboxes")
 	fs.StringVar(&cfg.GuestTLSKey, "guest-tls-key", envOr("GUEST_TLS_KEY", filepath.Join(tlsDir, "client", "tls.key")), "shared client key handed to sandboxes")

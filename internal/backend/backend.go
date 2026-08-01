@@ -88,6 +88,14 @@ type Image struct {
 	User string
 }
 
+// Network is one configured vmnet network. IPv4Gateway is the host-side
+// address of the Mac on that network — the address guests can dial.
+type Network struct {
+	Name        string
+	IPv4Gateway string
+	IPv4Subnet  string
+}
+
 // Runtime is the complete surface of the apple/container CLI used by the
 // driver. Every `container …` invocation goes through this interface.
 type Runtime interface {
@@ -115,12 +123,16 @@ type Runtime interface {
 	// host. Note: apple/container cp does not preserve the executable bit.
 	CopyFrom(ctx context.Context, name, guestPath, hostPath string) error
 
-	// NetworkList returns the names of configured vmnet networks.
-	NetworkList(ctx context.Context) ([]string, error)
+	// Networks returns the configured vmnet networks.
+	Networks(ctx context.Context) ([]Network, error)
 	// NetworkCreate creates a vmnet network with the given name.
 	NetworkCreate(ctx context.Context, name string) error
 
 	// Logs returns the last tail lines of a container's console output
 	// (all output when tail <= 0). Works on stopped containers.
 	Logs(ctx context.Context, name string, tail int) (string, error)
+
+	// SystemStart starts the container runtime's system services; it is
+	// idempotent when they already run.
+	SystemStart(ctx context.Context) error
 }

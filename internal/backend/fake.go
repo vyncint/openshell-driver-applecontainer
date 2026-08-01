@@ -12,7 +12,7 @@ type Fake struct {
 	mu         sync.Mutex
 	containers map[string]*fakeContainer
 	images     []Image
-	networks   []string
+	networks   []Network
 	runCalls   []RunSpec
 	pulls      []string
 
@@ -214,21 +214,38 @@ func (f *Fake) CopyFrom(_ context.Context, name, _, hostPath string) error {
 	return os.WriteFile(hostPath, data, 0o644)
 }
 
-func (f *Fake) NetworkList(_ context.Context) ([]string, error) {
+func (f *Fake) Networks(_ context.Context) ([]Network, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.NetworkListError != nil {
 		return nil, f.NetworkListError
 	}
-	out := make([]string, len(f.networks))
+	out := make([]Network, len(f.networks))
 	copy(out, f.networks)
 	return out, nil
 }
 
+// NetworkCreate registers the network with the address layout vmnet uses
+// on a real host (host-side gateway at .1).
 func (f *Fake) NetworkCreate(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.networks = append(f.networks, name)
+	f.networks = append(f.networks, Network{
+		Name:        name,
+		IPv4Gateway: "192.168.65.1",
+		IPv4Subnet:  "192.168.65.0/24",
+	})
+	return nil
+}
+
+// AddNetwork registers a pre-existing network.
+func (f *Fake) AddNetwork(n Network) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.networks = append(f.networks, n)
+}
+
+func (f *Fake) SystemStart(_ context.Context) error {
 	return nil
 }
 

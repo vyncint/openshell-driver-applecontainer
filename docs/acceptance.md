@@ -248,3 +248,41 @@ server force-stops — by design.)
    `--server-san` values refreshes the server certificate while preserving the CA, so
    existing client bundles stay valid. The server cert now carries SANs for
    `192.168.65.1`/`192.168.64.1` (vmnet gateway addresses) ahead of M3.
+
+## One-command setup (live)
+
+`setup` installed and wired the entire stack on this machine, verified end to end:
+
+```
+$ make install
+$ openshell-driver-applecontainer setup
+… msg="setup: vmnet network ready" network=oshl gateway_ip=192.168.65.1
+… msg="setup: gateway certificate covers the vmnet address" tls_dir=/opt/homebrew/var/openshell/tls san=192.168.65.1
+… msg="setup: gateway service configured to use the driver" file=~/.config/openshell/gateway.env
+… msg="setup: driver installed as a launchd service" plist=~/Library/LaunchAgents/local.openshell-driver-applecontainer.plist
+… msg="setup: driver service running" socket=/tmp/oshl-ac/driver.sock
+==> Successfully started `openshell` (label: homebrew.mxcl.openshell)
+… msg="setup: gateway is listening" address=127.0.0.1:17670
+Setup complete.
+
+$ openshell status
+  Authentication: Authenticated (mTLS transport)
+$ openshell sandbox create --name demo …   →  Ready
+$ openshell sandbox exec -n demo -- uname -a
+Linux oshl-1264af3e-… 6.18.15 … aarch64 GNU/Linux
+$ openshell sandbox delete demo
+✓ Deleted sandbox demo
+```
+
+This was the first run of the driver under the **stock Homebrew gateway service** (the
+service reads the managed block in `~/.config/openshell/gateway.env`).
+
+Resilience checks, all live:
+
+- `pkill` of the driver → launchd (KeepAlive) resurrected it with a fresh socket within
+  seconds.
+- `setup` re-run twice → no duplicated managed block, no changes to certs/network, clean
+  logs (one transient warning on the first re-run before the bootout-drain wait was added;
+  none after).
+- `uninstall` → agent, plist and gateway.env managed block removed, gateway service stopped;
+  `setup` again → full stack back, sandbox lifecycle verified once more.

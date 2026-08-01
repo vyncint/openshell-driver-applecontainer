@@ -266,6 +266,34 @@ func TestParseImageList(t *testing.T) {
 	}
 }
 
+// networkLsFixture is a trimmed real capture of `container network ls
+// --format json` from apple/container 1.2.0.
+const networkLsFixture = `[
+  {
+    "configuration": {"mode": "nat", "name": "oshl"},
+    "id": "oshl",
+    "status": {
+      "ipv4Gateway": "192.168.65.1",
+      "ipv4Subnet": "192.168.65.0/24",
+      "ipv6Subnet": "fd50:bd0:e79f:3b35::/64"
+    }
+  }
+]`
+
+func TestParseNetworkList(t *testing.T) {
+	got, err := ParseNetworkList([]byte(networkLsFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 network, got %d", len(got))
+	}
+	n := got[0]
+	if n.Name != "oshl" || n.IPv4Gateway != "192.168.65.1" || n.IPv4Subnet != "192.168.65.0/24" {
+		t.Errorf("network = %+v", n)
+	}
+}
+
 func TestCLIRunReturnsID(t *testing.T) {
 	rr := &recordingRunner{stdout: []byte("oshl-x\n")}
 	cli := &CLI{Bin: "container", Runner: rr}
