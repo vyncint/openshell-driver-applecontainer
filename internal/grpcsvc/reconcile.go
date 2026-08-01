@@ -159,13 +159,20 @@ func (s *Server) pollOnce(ctx context.Context) {
 		if tail == "" {
 			continue
 		}
+		// The entry may have moved on while logs were being fetched (e.g.
+		// a concurrent delete); both the message and the Warning event are
+		// gated on it still being exited so stale warnings are never
+		// emitted.
 		s.mu.Lock()
-		if e.cond.Reason == reasonContainerExited {
+		stillExited := e.cond.Reason == reasonContainerExited && !e.deleting
+		if stillExited {
 			e.cond.Message += "; console tail:\n" + tail
 		}
 		s.mu.Unlock()
-		s.publishPlatformEvent(e.rec.ID, "Warning", reasonContainerExited,
-			"Sandbox VM exited; console tail:\n"+tail)
+		if stillExited {
+			s.publishPlatformEvent(e.rec.ID, "Warning", reasonContainerExited,
+				"Sandbox VM exited; console tail:\n"+tail)
+		}
 	}
 
 	for _, e := range changed {
