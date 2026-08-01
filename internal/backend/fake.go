@@ -29,6 +29,7 @@ type Fake struct {
 type fakeContainer struct {
 	ctr  Container
 	spec RunSpec
+	logs string
 }
 
 func (f *Fake) init() {
@@ -75,6 +76,15 @@ func (f *Fake) SetState(name, s string) {
 	defer f.mu.Unlock()
 	if c, ok := f.containers[name]; ok {
 		c.ctr.State = s
+	}
+}
+
+// SetLogs sets the console output returned by Logs for a container.
+func (f *Fake) SetLogs(name, logs string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if c, ok := f.containers[name]; ok {
+		c.logs = logs
 	}
 }
 
@@ -214,6 +224,16 @@ func (f *Fake) NetworkCreate(_ context.Context, name string) error {
 	defer f.mu.Unlock()
 	f.networks = append(f.networks, name)
 	return nil
+}
+
+func (f *Fake) Logs(_ context.Context, name string, _ int) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	c, ok := f.containers[name]
+	if !ok {
+		return "", fmt.Errorf("%w: container %q", ErrNotFound, name)
+	}
+	return c.logs, nil
 }
 
 var _ Runtime = (*Fake)(nil)

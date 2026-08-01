@@ -3,6 +3,7 @@ package grpcsvc
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,7 @@ func TestBootstrapMarksStoppedAndMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake.SetState("oshl-"+stopped, "stopped")
+	fake.SetLogs("oshl-"+stopped, "mkdir: cannot create directory: Permission denied")
 
 	missing := "0195c1a2-cccc-0000-0000-000000000003"
 	seedRecord(t, srv, missing, "oshl-"+missing)
@@ -78,6 +80,9 @@ func TestBootstrapMarksStoppedAndMissing(t *testing.T) {
 	srv.mu.Unlock()
 	if condStopped.Reason != reasonContainerExited {
 		t.Errorf("stopped VM condition = %+v", condStopped)
+	}
+	if !strings.Contains(condStopped.Message, "Permission denied") {
+		t.Errorf("stopped VM condition lacks console tail: %q", condStopped.Message)
 	}
 	if condMissing.Reason != reasonProvisioningFailed {
 		t.Errorf("missing VM condition = %+v", condMissing)
@@ -121,19 +126,64 @@ func TestPollerTracksExit(t *testing.T) {
 	}
 	waitForCondition(t, srv, reasonBackendReady)
 
-	// VM dies out-of-band; the poller must notice and flip the condition.
+	// Subscribe before the transition to capture the Warning event.
+	subID, events := srv.hub.subscribe()
+	defer srv.hub.unsubscribe(subID)
+
+	// VM dies out-of-band; the poller must notice, flip the condition, and
+	// attach the guest console tail for diagnosability.
 	fake.SetState("oshl-"+testSandboxID, "stopped")
+	fake.SetLogs("oshl-"+testSandboxID, "boot.sh: fatal: something exploded\n")
 	srv.pollOnce(context.Background())
 
 	cond := waitForCondition(t, srv, reasonContainerExited)
 	if cond.Status != "False" {
 		t.Errorf("condition = %+v", cond)
 	}
+	if !strings.Contains(cond.Message, "something exploded") {
+		t.Errorf("condition message lacks console tail: %q", cond.Message)
+	}
+
+	var sawWarning bool
+	for len(events) > 0 {
+		ev := <-events
+		if pe := ev.GetPlatformEvent(); pe != nil &&
+			pe.GetEvent().GetType() == "Warning" &&
+			strings.Contains(pe.GetEvent().GetMessage(), "something exploded") {
+			sawWarning = true
+		}
+	}
+	if !sawWarning {
+		t.Error("no Warning platform event carrying the console tail")
+	}
 
 	// And back: runtime says running again (e.g. container start).
 	fake.SetState("oshl-"+testSandboxID, "running")
 	srv.pollOnce(context.Background())
 	waitForCondition(t, srv, reasonBackendReady)
+}
+
+func TestConsoleTailTruncatesAndSurvivesErrors(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+
+	// Unknown container: logs error must yield "" and not propagate.
+	if got := srv.consoleTail(context.Background(), "no-such"); got != "" {
+		t.Errorf("tail for unknown container = %q", got)
+	}
+
+	if _, err := fake.Run(context.Background(), backend.RunSpec{Name: "big", Image: testImage}); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 2000) + "END"
+	fake.SetLogs("big", long)
+	got := srv.consoleTail(context.Background(), "big")
+	if len([]rune(got)) > consoleTailMaxRunes+1 { // +1 for the ellipsis
+		t.Errorf("tail not truncated: %d runes", len([]rune(got)))
+	}
+	if !strings.HasSuffix(got, "END") {
+		t.Errorf("truncation must keep the end of the output, got %q…", got[:20])
+	}
 }
 
 func TestPollerSkipsInFlightProvisioning(t *testing.T) {

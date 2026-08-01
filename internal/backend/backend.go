@@ -119,4 +119,8 @@ type Runtime interface {
 	NetworkList(ctx context.Context) ([]string, error)
 	// NetworkCreate creates a vmnet network with the given name.
 	NetworkCreate(ctx context.Context, name string) error
+
+	// Logs returns the last tail lines of a container's console output
+	// (all output when tail <= 0). Works on stopped containers.
+	Logs(ctx context.Context, name string, tail int) (string, error)
 }
