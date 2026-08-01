@@ -97,13 +97,22 @@ Findings:
   `--label`, `--cidfile`, `-k/--kernel`, `--kernel-arg`, `--entrypoint`, `-c/--cpus`,
   `-m/--memory`, `--network`, `--publish-socket` (full flag inventory recorded during probing).
 
-## G0.4 — default sandbox image has arm64: PENDING (blocked on contract recon)
+## G0.4 — default sandbox image has arm64: PASS
 
-The exact default sandbox image reference is being derived from OpenShell v0.0.96 source
-during contract recon (docs/CONTRACT.md). Once identified, the image is pulled on this host
-and its manifest inspected for a linux/arm64 entry; the real transcript replaces this section.
-If the image lacks arm64, fallback is building one from openshell-community; if that proves
-impractical, this gate is marked blocked in STATUS.md.
+Contract recon (docs/CONTRACT.md §7) identified the defaults from source:
+`ghcr.io/nvidia/openshell-community/sandboxes/base:latest` (default sandbox image,
+core/image.rs:14-23) and `ghcr.io/nvidia/openshell/supervisor:0.0.96` (release-matched
+supervisor image). Both pulled on this host for linux/arm64:
+
+```
+$ container image pull ghcr.io/nvidia/openshell-community/sandboxes/base:latest --platform linux/arm64
+[2/2] Unpacking image for platform linux/arm64 100% (32.501 entries, 2,63 GB) [1m 59s]
+$ container image pull ghcr.io/nvidia/openshell/supervisor:0.0.96 --platform linux/arm64
+[2/2] Unpacking image for platform linux/arm64 100% (801 entries, 33,5 MB) [6s]
+$ container image ls | grep openshell
+ghcr.io/nvidia/openshell-community/sandboxes/base  latest   aeef1c63f00e
+ghcr.io/nvidia/openshell/supervisor                0.0.96   eca343a8a4ff
+```
 
 ## G0.5 — guest → gateway reachability: PASS (raw path proven)
 
@@ -147,11 +156,9 @@ From `container ls --format json` on a probe container: default resources are
 
 ## Unverified assumptions at Gate 0 close
 
-- G0.4 is not yet verified — it stays PENDING until the source-derived image reference is
-  pulled and its manifest inspected on this host.
-- Whether the gateway supports listening on a non-loopback address purely via configuration
-  (option a) is resolved during M1/M2 from gateway source and docs; the raw network path is
-  proven either way.
+- G0.5 option (a) is confirmed to exist in source (gateway `bind_address` is configurable and
+  `server_sans` adds cert SANs — docs/CONTRACT.md §5); exercising it live happens in M2/M3.
+  The raw network path is proven above either way.
 - `status.state` value `stopped` after `container stop` has been observed in prior lab work
   on this machine but not yet re-verified in this project; it is re-checked when lifecycle
   work lands in M4.
