@@ -1,0 +1,76 @@
+version: 2
+
+project_name: openshell-driver-applecontainer
+
+builds:
+  - id: driver
+    main: ./cmd/openshell-driver-applecontainer
+    binary: openshell-driver-applecontainer
+    env:
+      - CGO_ENABLED=0
+    # apple/container is Apple-silicon-only; do not ship other targets.
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .ShortCommit }}
+      - -X main.date={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat(\(.*\))?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.*\))?:'
+      order: 1
+    - title: Documentation
+      regexp: '^docs(\(.*\))?:'
+      order: 2
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^chore\(release\)'
+
+release:
+  prerelease: auto
+  footer: |
+    Unsigned binary: after download, run
+    `xattr -d com.apple.quarantine openshell-driver-applecontainer`.
+
+    Compatibility: OpenShell v0.0.96, apple/container 1.2.0, Apple silicon macOS 26.
+
+# TODO when the repository goes public: enable the Homebrew tap (a private
+# tap is useless — brew cannot fetch from private release assets without
+# extra credentials).
+#
+# brews:
+#   - repository:
+#       owner: vyncint
+#       name: homebrew-tap
+#     directory: Formula
+#     homepage: https://github.com/vyncint/openshell-driver-applecontainer
+#     description: OpenShell compute driver backed by apple/container micro-VMs
+#     license: Apache-2.0
+#     install: |
+#       bin.install "openshell-driver-applecontainer"
