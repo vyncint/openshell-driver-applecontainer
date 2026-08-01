@@ -251,7 +251,9 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 	}
 	if kernel != "" {
 		if _, err := os.Stat(kernel); err != nil {
-			return fmt.Errorf("custom kernel: %w", err)
+			// The path may come from the driver default or the per-sandbox
+			// config; name it explicitly so the failure is diagnosable.
+			return fmt.Errorf("kernel %q is not usable: %w", kernel, err)
 		}
 	}
 

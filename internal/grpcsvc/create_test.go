@@ -352,8 +352,8 @@ func TestMissingDefaultKernelFailsProvisioning(t *testing.T) {
 		t.Fatal(err)
 	}
 	cond := waitForCondition(t, srv, reasonProvisioningFailed)
-	if !strings.Contains(cond.Message, "custom kernel") {
-		t.Errorf("failure message = %q", cond.Message)
+	if !strings.Contains(cond.Message, "kernel") || !strings.Contains(cond.Message, "/nonexistent/vmlinux") {
+		t.Errorf("failure message must name the kernel path, got %q", cond.Message)
 	}
 }
 
