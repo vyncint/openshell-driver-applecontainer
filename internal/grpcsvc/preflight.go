@@ -26,8 +26,15 @@ func Preflight(ctx context.Context, cfg config.Config, rt backend.Runtime, log *
 	if cfg.GRPCEndpoint == "" {
 		log.Warn("no --grpc-endpoint configured; sandbox creates will fail until it is set to the gateway address reachable from guest VMs")
 	} else {
+		// The rest of the driver (and the in-guest supervisor) switches TLS
+		// behavior on the literal lowercase "https://" prefix, so anything
+		// else — other schemes, uppercase variants — would pass here and
+		// then misbehave at provisioning. Require the canonical form.
+		if !strings.HasPrefix(cfg.GRPCEndpoint, "http://") && !strings.HasPrefix(cfg.GRPCEndpoint, "https://") {
+			return fmt.Errorf("preflight: --grpc-endpoint %q must be an http:// or https:// URL (lowercase scheme)", cfg.GRPCEndpoint)
+		}
 		u, err := url.Parse(cfg.GRPCEndpoint)
-		if err != nil || u.Scheme == "" || u.Hostname() == "" {
+		if err != nil || u.Hostname() == "" {
 			return fmt.Errorf("preflight: --grpc-endpoint %q is not a valid URL", cfg.GRPCEndpoint)
 		}
 		if isLoopbackHost(u.Hostname()) {
@@ -35,7 +42,7 @@ func Preflight(ctx context.Context, cfg config.Config, rt backend.Runtime, log *
 				"use the vmnet gateway address (e.g. https://192.168.65.1:17670), start the gateway with a non-loopback "+
 				"bind address, and make sure its server certificate carries a SAN for that address", cfg.GRPCEndpoint)
 		}
-		if u.Scheme == "https" {
+		if strings.HasPrefix(cfg.GRPCEndpoint, "https://") {
 			for what, p := range map[string]string{
 				"guest TLS CA":   cfg.GuestTLSCA,
 				"guest TLS cert": cfg.GuestTLSCert,

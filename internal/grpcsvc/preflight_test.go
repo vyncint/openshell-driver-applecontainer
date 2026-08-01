@@ -31,10 +31,19 @@ func TestPreflightRejectsLoopbackEndpoint(t *testing.T) {
 }
 
 func TestPreflightRejectsInvalidEndpoint(t *testing.T) {
-	cfg := testConfig()
-	cfg.GRPCEndpoint = "not a url"
-	if err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default()); err == nil {
-		t.Error("want error for invalid endpoint URL")
+	for _, ep := range []string{
+		"not a url",
+		"HTTPS://192.168.65.1:17670", // uppercase scheme: TLS env injection matches lowercase https:// only
+		"tcp://192.168.65.1:17670",   // non-http scheme
+		"192.168.65.1:17670",         // no scheme
+	} {
+		t.Run(ep, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.GRPCEndpoint = ep
+			if err := Preflight(context.Background(), cfg, &backend.Fake{}, slog.Default()); err == nil {
+				t.Errorf("endpoint %q must fail preflight", ep)
+			}
+		})
 	}
 }
 
