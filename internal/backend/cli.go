@@ -323,26 +323,44 @@ func (c *CLI) CopyFrom(ctx context.Context, name, guestPath, hostPath string) er
 	return err
 }
 
-func (c *CLI) NetworkList(ctx context.Context) ([]string, error) {
+// ParseNetworkList decodes `container network ls --format json` output.
+func ParseNetworkList(data []byte) ([]Network, error) {
+	var entries []struct {
+		ID     string `json:"id"`
+		Status struct {
+			IPv4Gateway string `json:"ipv4Gateway"`
+			IPv4Subnet  string `json:"ipv4Subnet"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("parse network list: %w", err)
+	}
+	out := make([]Network, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, Network{
+			Name:        e.ID,
+			IPv4Gateway: e.Status.IPv4Gateway,
+			IPv4Subnet:  e.Status.IPv4Subnet,
+		})
+	}
+	return out, nil
+}
+
+func (c *CLI) Networks(ctx context.Context) ([]Network, error) {
 	out, err := c.run(ctx, "network", "ls", "--format", "json")
 	if err != nil {
 		return nil, err
 	}
-	var entries []struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return nil, fmt.Errorf("parse network list: %w", err)
-	}
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.ID)
-	}
-	return names, nil
+	return ParseNetworkList(out)
 }
 
 func (c *CLI) NetworkCreate(ctx context.Context, name string) error {
 	_, err := c.run(ctx, "network", "create", name)
+	return err
+}
+
+func (c *CLI) SystemStart(ctx context.Context) error {
+	_, err := c.run(ctx, "system", "start")
 	return err
 }
 

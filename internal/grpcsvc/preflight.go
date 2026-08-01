@@ -7,25 +7,41 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 )
 
-// Preflight validates driver configuration at startup so misconfiguration
-// surfaces immediately instead of at the first create (or worse, as a
-// sandbox that silently never becomes Ready).
+// gatewayPort is OpenShell's default server port, used when deriving the
+// guest-reachable endpoint from the vmnet network.
+const gatewayPort = "17670"
+
+// Preflight validates and completes driver configuration at startup so
+// misconfiguration surfaces immediately instead of at the first create (or
+// worse, as a sandbox that silently never becomes Ready).
 //
-// Hard error: a loopback --grpc-endpoint — guest VMs can never reach the
-// host's loopback, so every sandbox would hang in Provisioning.
-// Warnings: empty endpoint, unreadable guest TLS files.
-// Convenience: the configured vmnet network is created when absent.
-func Preflight(ctx context.Context, cfg config.Config, rt backend.Runtime, log *slog.Logger) error {
+//   - The configured vmnet network is created when absent (starting the
+//     container runtime first when it is down).
+//   - An empty --grpc-endpoint is derived from the network's host-side
+//     gateway address (https://<gateway-ip>:17670) — the zero-config path.
+//   - A loopback endpoint is a hard error: guest VMs can never reach the
+//     host's loopback, so every sandbox would hang in Provisioning.
+//   - Unreadable guest TLS files warn.
+func Preflight(ctx context.Context, cfg *config.Config, rt backend.Runtime, log *slog.Logger) error {
+	gatewayIP := ensureNetwork(ctx, cfg.Network, rt, log)
+
 	if cfg.GRPCEndpoint == "" {
-		log.Warn("no --grpc-endpoint configured; sandbox creates will fail until it is set to the gateway address reachable from guest VMs")
-	} else {
+		if gatewayIP != "" {
+			cfg.GRPCEndpoint = "https://" + net.JoinHostPort(gatewayIP, gatewayPort)
+			log.Info("derived gateway endpoint from the vmnet network",
+				"network", cfg.Network, "endpoint", cfg.GRPCEndpoint)
+		} else {
+			log.Warn("no --grpc-endpoint configured and none could be derived; sandbox creates will fail until it is set to the gateway address reachable from guest VMs")
+		}
+	}
+
+	if cfg.GRPCEndpoint != "" {
 		// The rest of the driver (and the in-guest supervisor) switches TLS
 		// behavior on the literal lowercase "https://" prefix, so anything
 		// else — other schemes, uppercase variants — would pass here and
@@ -55,22 +71,46 @@ func Preflight(ctx context.Context, cfg config.Config, rt backend.Runtime, log *
 			}
 		}
 	}
+	return nil
+}
 
-	networks, err := rt.NetworkList(ctx)
+// ensureNetwork makes sure the vmnet network exists and returns its
+// host-side gateway address, or "" when the runtime is unavailable. A down
+// container runtime gets one start attempt (the state after a reboot).
+func ensureNetwork(ctx context.Context, name string, rt backend.Runtime, log *slog.Logger) string {
+	networks, err := rt.Networks(ctx)
 	if err != nil {
-		log.Warn("could not verify the vmnet network (container runtime unreachable?); continuing",
-			"network", cfg.Network, "err", err)
-		return nil
-	}
-	if !slices.Contains(networks, cfg.Network) {
-		if err := rt.NetworkCreate(ctx, cfg.Network); err != nil {
-			log.Warn("failed to create the vmnet network; sandbox boots will fail until it exists",
-				"network", cfg.Network, "err", err)
-		} else {
-			log.Info("created vmnet network", "network", cfg.Network)
+		log.Warn("container runtime unreachable; attempting to start it", "err", err)
+		if serr := rt.SystemStart(ctx); serr != nil {
+			log.Warn("could not start the container runtime; continuing without network checks", "err", serr)
+			return ""
+		}
+		if networks, err = rt.Networks(ctx); err != nil {
+			log.Warn("could not list vmnet networks; continuing without network checks", "err", err)
+			return ""
 		}
 	}
-	return nil
+	for _, n := range networks {
+		if n.Name == name {
+			return n.IPv4Gateway
+		}
+	}
+	if err := rt.NetworkCreate(ctx, name); err != nil {
+		log.Warn("failed to create the vmnet network; sandbox boots will fail until it exists",
+			"network", name, "err", err)
+		return ""
+	}
+	log.Info("created vmnet network", "network", name)
+	networks, err = rt.Networks(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, n := range networks {
+		if n.Name == name {
+			return n.IPv4Gateway
+		}
+	}
+	return ""
 }
 
 // isLoopbackHost reports whether an endpoint hostname can only ever resolve

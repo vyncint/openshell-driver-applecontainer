@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **One-command installation**: `openshell-driver-applecontainer setup` wires the whole stack
+  permanently — driver as a launchd service, the stock Homebrew gateway service configured
+  through its `gateway.env` hook (driver selection, non-loopback bind, mTLS auth), gateway
+  certificate SAN for the vmnet address (CA preserved), vmnet network creation, CLI
+  registration repair, and image pre-pull. Idempotent; `uninstall` reverses it.
+- Gateway endpoint auto-derivation: with `--grpc-endpoint` unset the driver resolves
+  `https://<vmnet-gateway-ip>:17670` from the configured network at startup, so zero flags
+  are needed.
+- Guest TLS bundle auto-detection across the standard locations (`$OPENSHELL_LOCAL_TLS_DIR`,
+  XDG state, Homebrew) and a container-runtime auto-start attempt when it is down.
+- Guest console tail attached to exited-sandbox conditions and Warning events; startup
+  preflight validation; driver-level `--kernel` default (from the risk-fix round).
+- `make install` target.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added

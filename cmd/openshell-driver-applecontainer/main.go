@@ -31,14 +31,48 @@ var (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("openshell-driver-applecontainer %s (commit %s, built %s)\n", version, commit, date)
-		return
+	args := os.Args[1:]
+	if len(args) > 0 {
+		switch args[0] {
+		case "--version", "version":
+			fmt.Printf("openshell-driver-applecontainer %s (commit %s, built %s)\n", version, commit, date)
+			return
+		case "setup":
+			os.Exit(runSetup(args[1:]))
+		case "uninstall":
+			os.Exit(runUninstall(args[1:]))
+		case "help", "--help", "-h":
+			printUsage()
+			return
+		}
 	}
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(args); err != nil {
 		slog.Error("driver exited with error", "err", err)
 		os.Exit(1)
 	}
+}
+
+func printUsage() {
+	fmt.Print(`openshell-driver-applecontainer — OpenShell compute driver backed by apple/container
+
+Usage:
+  openshell-driver-applecontainer setup [--no-pull] [--network NAME]
+        One-time host setup: installs the driver as a launchd service,
+        configures the OpenShell gateway service to use it, ensures the
+        vmnet network and gateway certificate, and pre-pulls images.
+        Idempotent — re-run any time to repair the installation.
+
+  openshell-driver-applecontainer uninstall
+        Removes the services and configuration that setup installed.
+
+  openshell-driver-applecontainer [flags]
+        Runs the driver in the foreground (development). See -h of the
+        bare command for flags; with no flags everything is derived:
+        the vmnet network is created and the gateway endpoint resolved
+        automatically.
+
+  openshell-driver-applecontainer --version
+`)
 }
 
 func run(args []string) error {
@@ -55,22 +89,21 @@ func run(args []string) error {
 		return err
 	}
 	rt := backend.NewCLI(log)
-	srv := grpcsvc.New(cfg, rt, store, log, version)
 
-	// Fail fast on configuration that can never work; reconcile persisted
-	// records against the runtime before serving; then keep conditions
-	// fresh with the runtime poller.
-	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 30*time.Second)
-	err = grpcsvc.Preflight(bootCtx, cfg, rt, log)
-	if err == nil {
-		err = srv.Bootstrap(bootCtx)
-		if err != nil {
-			err = fmt.Errorf("startup reconcile: %w", err)
-		}
+	// Fail fast on configuration that can never work and complete the
+	// zero-config defaults (derived endpoint, auto-created network) BEFORE
+	// the server captures the config; then reconcile persisted records
+	// against the runtime and keep conditions fresh with the poller.
+	bootCtx, cancelBoot := context.WithTimeout(context.Background(), 60*time.Second)
+	if err := grpcsvc.Preflight(bootCtx, &cfg, rt, log); err != nil {
+		cancelBoot()
+		return err
 	}
+	srv := grpcsvc.New(cfg, rt, store, log, version)
+	err = srv.Bootstrap(bootCtx)
 	cancelBoot()
 	if err != nil {
-		return err
+		return fmt.Errorf("startup reconcile: %w", err)
 	}
 	srv.StartPoller()
 

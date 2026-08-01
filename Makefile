@@ -5,10 +5,17 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-.PHONY: build test lint vet proto prep e2e soak clean
+PREFIX ?= /opt/homebrew
+
+.PHONY: build install test lint vet proto prep e2e soak clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
+
+# Install the driver binary; follow with `$(BINARY) setup`.
+install: build
+	install -d "$(PREFIX)/bin"
+	install -m 0755 bin/$(BINARY) "$(PREFIX)/bin/$(BINARY)"
 
 test:
 	go test -race ./...
