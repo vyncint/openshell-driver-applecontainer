@@ -24,6 +24,9 @@ type Fake struct {
 	// CopySrc, when set, is copied to the destination by CopyFrom;
 	// otherwise a small placeholder ELF header is written.
 	CopySrc []byte
+	// NetworkListError, when set, fails NetworkList calls (simulates an
+	// unreachable container runtime).
+	NetworkListError error
 }
 
 type fakeContainer struct {
@@ -214,6 +217,9 @@ func (f *Fake) CopyFrom(_ context.Context, name, _, hostPath string) error {
 func (f *Fake) NetworkList(_ context.Context) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.NetworkListError != nil {
+		return nil, f.NetworkListError
+	}
 	out := make([]string, len(f.networks))
 	copy(out, f.networks)
 	return out, nil
