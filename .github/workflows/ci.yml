@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race -coverprofile=coverage.out ./...
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}
+          path: coverage.out
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Cross-compile for the only supported target; cgo stays off.
+      - run: GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
+      - run: go vet ./...
+
+  commit-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # CI mirror of .githooks/commit-msg: scan every commit message in
+      # the repository for forbidden attribution patterns.
+      - name: audit commit messages
+        run: |
+          set -eu
+          pattern='claude|anthropic|co-authored-by|generated with|ai-assisted'
+          matches=$(git log --format='%H %s %b' | grep -icE "$pattern" || true)
+          if [ "$matches" -ne 0 ]; then
+            echo "commit-audit: forbidden attribution pattern found in commit messages:" >&2
+            git log --format='%H %s %b' | grep -iE "$pattern" >&2
+            exit 1
+          fi
+          echo "commit-audit: clean ($(git rev-list --count HEAD) commits scanned)"
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...

@@ -1,0 +1,30 @@
+# End-to-end tests boot real apple/container micro-VMs against a live
+# OpenShell gateway. They REQUIRE a self-hosted Apple-silicon macOS runner
+# with apple/container and OpenShell installed — GitHub-hosted runners can
+# never run them (no Virtualization.framework VM support, no gateway), so
+# this workflow is manual-dispatch only and must be skipped, not faked,
+# anywhere else. Local equivalent: `make e2e`.
+name: e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: verify host prerequisites
+        run: |
+          set -eu
+          uname -m | grep -qx arm64 || { echo "requires Apple silicon"; exit 1; }
+          container system status || { echo "apple/container is not running"; exit 1; }
+          command -v openshell >/dev/null || { echo "OpenShell CLI missing"; exit 1; }
+      - run: make prep
+      - run: make e2e
