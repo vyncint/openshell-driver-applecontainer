@@ -216,7 +216,7 @@ recon in `docs/CONTRACT.md`.
 
 | driver | OpenShell (pinned tag) | apple/container | host |
 |---|---|---|---|
-| v0.1.x | v0.0.96 (`5541398ccbda`) | 1.2.0 | Apple silicon, macOS 26 |
+| v0.1.x – v0.2.x | v0.0.96 (`5541398ccbda`) | 1.2.0 | Apple silicon, macOS 26 |
 
 ## Install from a release (pre-Homebrew)
 
