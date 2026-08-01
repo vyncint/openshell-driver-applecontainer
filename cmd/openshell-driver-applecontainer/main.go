@@ -100,6 +100,7 @@ func run(args []string) error {
 		log.Warn("graceful drain timed out, forcing stop")
 		gs.Stop()
 	}
+	srv.Close()
 	return nil
 }
 

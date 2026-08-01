@@ -114,13 +114,14 @@ func TestValidateSandboxCreate(t *testing.T) {
 	}
 }
 
-func TestCreateSandboxUnimplemented(t *testing.T) {
-	client := dialTestServer(t, newTestServer(t))
+func TestCreateSandboxRequiresEndpoint(t *testing.T) {
+	srv := newTestServer(t) // testConfig has no GRPCEndpoint by default
+	client := dialTestServer(t, srv)
 	_, err := client.CreateSandbox(context.Background(), &computev1.CreateSandboxRequest{
 		Sandbox: &computev1.DriverSandbox{Id: "0195c1a2-0000-0000-0000-000000000003", Name: "sb"},
 	})
-	if status.Code(err) != codes.Unimplemented {
-		t.Errorf("want Unimplemented, got %v", err)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("want FailedPrecondition without --grpc-endpoint, got %v", err)
 	}
 }
 

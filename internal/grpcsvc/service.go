@@ -5,6 +5,7 @@ package grpcsvc
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -13,6 +14,7 @@ import (
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 	computev1 "github.com/vyncint/openshell-driver-applecontainer/internal/gen/computev1"
+	"github.com/vyncint/openshell-driver-applecontainer/internal/seed"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/state"
 )
 
@@ -25,18 +27,28 @@ type entry struct {
 	rec      state.Record
 	cond     condition
 	deleting bool
+	// cancel aborts an in-flight provisioning task (delete-mid-create).
+	cancel context.CancelFunc
+	// done is closed when the provisioning task finishes.
+	done chan struct{}
 }
 
 // Server implements computev1.ComputeDriverServer.
 type Server struct {
 	computev1.UnimplementedComputeDriverServer
 
-	cfg     config.Config
-	rt      backend.Runtime
-	store   *state.Store
-	log     *slog.Logger
-	version string
-	hub     *hub
+	cfg       config.Config
+	rt        backend.Runtime
+	store     *state.Store
+	log       *slog.Logger
+	version   string
+	hub       *hub
+	extractor *seed.Extractor
+
+	// bgCtx parents provisioning tasks so shutdown cancels them.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	wg       sync.WaitGroup
 
 	mu        sync.Mutex
 	sandboxes map[string]*entry
@@ -47,15 +59,29 @@ func New(cfg config.Config, rt backend.Runtime, store *state.Store, log *slog.Lo
 	if log == nil {
 		log = slog.Default()
 	}
+	bgCtx, bgCancel := context.WithCancel(context.Background())
 	return &Server{
-		cfg:       cfg,
-		rt:        rt,
-		store:     store,
-		log:       log,
-		version:   version,
-		hub:       newHub(log),
+		cfg:     cfg,
+		rt:      rt,
+		store:   store,
+		log:     log,
+		version: version,
+		hub:     newHub(log),
+		extractor: &seed.Extractor{
+			RT:       rt,
+			CacheDir: filepath.Join(cfg.StateDir, "cache", "supervisor"),
+			Log:      log,
+		},
+		bgCtx:     bgCtx,
+		bgCancel:  bgCancel,
 		sandboxes: make(map[string]*entry),
 	}
+}
+
+// Close cancels background provisioning and waits for tasks to finish.
+func (s *Server) Close() {
+	s.bgCancel()
+	s.wg.Wait()
 }
 
 func (s *Server) GetCapabilities(_ context.Context, _ *computev1.GetCapabilitiesRequest) (*computev1.GetCapabilitiesResponse, error) {
@@ -88,20 +114,6 @@ func (s *Server) ValidateSandboxCreate(_ context.Context, req *computev1.Validat
 	return &computev1.ValidateSandboxCreateResponse{}, nil
 }
 
-func (s *Server) CreateSandbox(_ context.Context, req *computev1.CreateSandboxRequest) (*computev1.CreateSandboxResponse, error) {
-	sb := req.GetSandbox()
-	s.log.Info("create sandbox requested",
-		"sandbox_id", sb.GetId(),
-		"name", sb.GetName(),
-		"workspace", sb.GetWorkspace(),
-		"image", sb.GetSpec().GetTemplate().GetImage(),
-	)
-	if err := s.validateSandbox(sb); err != nil {
-		return nil, err
-	}
-	return nil, status.Error(codes.Unimplemented, "CreateSandbox is not implemented yet")
-}
-
 func (s *Server) GetSandbox(_ context.Context, req *computev1.GetSandboxRequest) (*computev1.GetSandboxResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,12 +135,9 @@ func (s *Server) ListSandboxes(_ context.Context, _ *computev1.ListSandboxesRequ
 }
 
 func (s *Server) StopSandbox(_ context.Context, _ *computev1.StopSandboxRequest) (*computev1.StopSandboxResponse, error) {
+	// The gateway never calls this in v0.0.96; parity with the managed VM
+	// driver until a caller exists.
 	return nil, status.Error(codes.Unimplemented, "StopSandbox is not implemented yet")
-}
-
-func (s *Server) DeleteSandbox(_ context.Context, req *computev1.DeleteSandboxRequest) (*computev1.DeleteSandboxResponse, error) {
-	s.log.Info("delete sandbox requested", "sandbox_id", req.GetSandboxId(), "name", req.GetSandboxName())
-	return nil, status.Error(codes.Unimplemented, "DeleteSandbox is not implemented yet")
 }
 
 func (s *Server) WatchSandboxes(_ *computev1.WatchSandboxesRequest, stream computev1.ComputeDriver_WatchSandboxesServer) error {

@@ -13,8 +13,11 @@ import (
 const (
 	conditionReady = "Ready"
 
-	reasonStarting     = "Starting"
-	reasonBackendReady = "BackendReady"
+	reasonStarting           = "Starting"
+	reasonBackendReady       = "BackendReady"
+	reasonContainerExited    = "ContainerExited"
+	reasonProvisioningFailed = "ProvisioningFailed"
+	reasonDeleting           = "Deleting"
 )
 
 type condition struct {
@@ -44,4 +47,12 @@ func startingCondition() condition {
 
 func readyTrueCondition() condition {
 	return condition{Status: "True", Reason: reasonBackendReady, Message: "Sandbox VM is running", At: time.Now()}
+}
+
+func failedCondition(msg string) condition {
+	return condition{Status: "False", Reason: reasonProvisioningFailed, Message: msg, At: time.Now()}
+}
+
+func deletingCondition() condition {
+	return condition{Status: "False", Reason: reasonDeleting, Message: "Sandbox is being deleted", At: time.Now()}
 }
