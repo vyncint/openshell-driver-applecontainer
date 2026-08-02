@@ -32,11 +32,32 @@ openshell sandbox delete demo
 
 Both services start at login and restart on failure — nothing to launch by hand, ever.
 `setup` is **idempotent**: re-run it any time (after an upgrade, after changing flags, or just
-to repair the installation). `openshell-driver-applecontainer uninstall` removes everything
-setup installed.
+to repair the installation). To upgrade or remove the stack later, see
+[Update and remove](#update-and-remove).
 
 The installer is non-interactive with `-y`, and takes `--no-setup`, `--version vX.Y.Z`, and
 `--prefix <dir>` (or the `OSHL_AC_YES`, `OSHL_AC_VERSION`, `OSHL_AC_PREFIX` env vars).
+
+### Update and remove
+
+Two commands manage the stack's lifecycle, mirroring apple/container's own
+`update-container.sh` / `uninstall-container.sh`:
+
+```sh
+openshell-driver-applecontainer update            # update the driver to the latest release, then re-setup
+openshell-driver-applecontainer update --all      # also update OpenShell (brew) and apple/container
+openshell-driver-applecontainer update --version vX.Y.Z   # pin a specific driver release
+
+openshell-driver-applecontainer cleanup           # remove the driver service + gateway wiring (data kept)
+openshell-driver-applecontainer cleanup -d        # also remove driver state, vmnet network and pulled images
+openshell-driver-applecontainer cleanup --all -d  # full teardown: also remove OpenShell and apple/container
+```
+
+`update` downloads the release, verifies its checksum, replaces the binary in place, and re-runs
+`setup` so the service restarts on it (`--no-setup` skips that). `cleanup` layers like the
+apple/container uninstaller: the bare command touches only the driver; `-d`/`--delete-data` also
+removes its data (`-k`/`--keep-data` is the default); `--all` also removes the prerequisites
+(apple/container's uninstaller needs `sudo`). `uninstall` remains as an alias for `cleanup`.
 
 ### Manual install
 

@@ -41,6 +41,10 @@ func main() {
 			return
 		case "setup":
 			os.Exit(runSetup(args[1:]))
+		case "update":
+			os.Exit(runUpdate(args[1:]))
+		case "cleanup":
+			os.Exit(runCleanup(args[1:]))
 		case "uninstall":
 			os.Exit(runUninstall(args[1:]))
 		case "help", "--help", "-h":
@@ -64,8 +68,19 @@ Usage:
         vmnet network and gateway certificate, and pre-pulls images.
         Idempotent — re-run any time to repair the installation.
 
-  openshell-driver-applecontainer uninstall
-        Removes the services and configuration that setup installed.
+  openshell-driver-applecontainer update [--version vX.Y.Z] [--all] [--no-setup]
+        Updates the driver to the latest release (verifying its checksum)
+        and re-runs setup so the service restarts on the new binary. --all
+        also updates the prerequisites (OpenShell via brew, apple/container
+        via its own updater). --no-setup replaces the binary only.
+
+  openshell-driver-applecontainer cleanup [-d | -k] [--all]
+        Reverses setup. By default removes only the driver's service and
+        gateway wiring (data kept). -d/--delete-data also removes the
+        driver's state, vmnet network and pulled images; -k/--keep-data is
+        the default. --all also removes the prerequisites (OpenShell via
+        brew, apple/container via its own uninstaller, which needs sudo).
+        The "uninstall" subcommand is a backward-compatible alias.
 
   openshell-driver-applecontainer [flags]
         Runs the driver in the foreground (development). See -h of the
