@@ -114,12 +114,14 @@ func TestListenUnixRemovesStaleSocket(t *testing.T) {
 // TestRemoveSocketIfOwnedGuardsAgainstReplacement reproduces the exact race
 // from issue #21: an old instance's deferred cleanup must not delete a
 // newer instance's live socket file when the path has been rebound in
-// between.
+// between. Ownership is tracked via a companion token file rather than
+// device/inode, since inode-reuse timing after an unlink is not guaranteed
+// to differ across filesystems/platforms.
 func TestRemoveSocketIfOwnedGuardsAgainstReplacement(t *testing.T) {
 	path := filepath.Join(shortTempDir(t), "driver.sock")
 
-	// "Old" instance binds first and records its identity.
-	oldLis, oldID, err := listenUnix(path)
+	// "Old" instance binds first and claims ownership.
+	oldLis, oldToken, err := listenUnix(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,21 +129,22 @@ func TestRemoveSocketIfOwnedGuardsAgainstReplacement(t *testing.T) {
 
 	// A "newer" instance rebinds the same path while the old one is still
 	// mid-shutdown (this is exactly what a fresh listenUnix call does: the
-	// old socket looks stale/unresponsive, so it's removed and replaced).
-	newLis, newID, err := listenUnix(path)
+	// old socket looks stale/unresponsive, so it's removed, replaced, and
+	// ownership reclaimed with a fresh token).
+	newLis, newToken, err := listenUnix(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = newLis.Close() }()
 
-	if oldID == newID {
-		t.Fatal("test setup invalid: rebinding did not produce a new identity")
+	if oldToken == newToken {
+		t.Fatal("test setup invalid: rebinding did not produce a new ownership token")
 	}
 
 	// The old instance's shutdown now runs its deferred cleanup with its
-	// OWN (now-stale) identity. It must NOT remove the new instance's socket.
+	// OWN (now-stale) token. It must NOT remove the new instance's socket.
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	removeSocketIfOwned(path, oldID, log)
+	removeSocketIfOwned(path, oldToken, log)
 
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("newer instance's socket was removed by the old instance's cleanup: %v", err)
@@ -149,7 +152,34 @@ func TestRemoveSocketIfOwnedGuardsAgainstReplacement(t *testing.T) {
 
 	// A correctly-identified owner (the new instance) can still remove its
 	// own socket normally.
-	removeSocketIfOwned(path, newID, log)
+	removeSocketIfOwned(path, newToken, log)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("owned socket should have been removed, got err=%v", err)
+	}
+}
+
+// TestRemoveSocketIfOwnedTokenMismatch exercises the token-comparison logic
+// directly, without any real socket binding/rebinding, so it is fully
+// deterministic regardless of filesystem inode-reuse behavior.
+func TestRemoveSocketIfOwnedTokenMismatch(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "driver.sock")
+	if err := os.WriteFile(path, []byte("socket-placeholder"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := claimSocketOwnership(path, "the-real-owner-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	// A mismatched token must not remove the socket.
+	removeSocketIfOwned(path, "a-different-token", log)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("socket removed despite token mismatch: %v", err)
+	}
+
+	// The matching token removes it.
+	removeSocketIfOwned(path, "the-real-owner-token", log)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("owned socket should have been removed, got err=%v", err)
 	}
