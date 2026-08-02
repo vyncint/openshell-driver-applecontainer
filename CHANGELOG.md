@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-02
+
 ### Fixed
 
 - Fixed a race where an old driver instance's deferred socket cleanup could delete a *newer*
@@ -128,7 +130,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.1.0...v0.2.0
