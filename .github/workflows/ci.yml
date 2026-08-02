@@ -76,3 +76,31 @@ jobs:
           go-version-file: go.mod
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
+
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Every non-merge commit in the PR must carry a DCO Signed-off-by
+      # trailer (CONTRIBUTING.md). Historical commits are not re-checked.
+      - name: check DCO sign-off on PR commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          bad=0
+          for c in $(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA"); do
+            if ! git log -1 --format=%B "$c" | grep -qi '^Signed-off-by: '; then
+              echo "missing Signed-off-by: $c $(git log -1 --format=%s "$c")" >&2
+              bad=1
+            fi
+          done
+          if [ "$bad" -ne 0 ]; then
+            echo "dco: add sign-offs with 'git commit -s --amend' or 'git rebase --signoff' (see CONTRIBUTING.md)" >&2
+            exit 1
+          fi
+          echo "dco: all PR commits signed off"

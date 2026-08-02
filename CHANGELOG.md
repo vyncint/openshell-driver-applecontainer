@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Open-source governance set: MAINTAINERS.md, CODEOWNERS, Contributor Covenant code of
+  conduct, issue and pull-request templates.
+- DCO sign-off is now required for contributions: `Signed-off-by` enforced on pull-request
+  commits by a new `dco` CI job, added automatically by the repo's `prepare-commit-msg` hook,
+  and applied to web-UI commits by a repository setting.
+
 ## [0.2.0] - 2026-08-02
 
 ### Added

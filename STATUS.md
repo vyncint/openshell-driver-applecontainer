@@ -7,7 +7,7 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 
 | Milestone | State | Notes |
 |---|---|---|
-| Phase 0 — repo bootstrap | **done** | Private repo, commit-msg hook active before first commit, repo-local identity `Vyncint Ng <vyncint@users.noreply.github.com>`. |
+| Phase 0 — repo bootstrap | **done** | Repo bootstrapped private; commit-msg hook active before first commit; repo-local identity `Vyncint Ng <vyncint@users.noreply.github.com>`. |
 | Gate 0 — prerequisites | **done** | G0.1 pass; G0.2 Landlock absent → best_effort (custom-kernel escape hatch documented); G0.3 pass (virtiofs ro, no noexec, exec bit preserved); G0.4 pass (base + supervisor images pull for arm64); G0.5 pass (guest→host vmnet TCP proven; gateway `bind_address`+`server_sans` confirmed in source); G0.6 pass. Transcripts in docs/gate0.md. |
 | M1 — contract recon | **done** | docs/CONTRACT.md; protos vendored (Apache-2.0, NOTICE); Go stubs via pinned buf plugins. 8 RPCs — kill criterion not triggered. |
 | M2 — hello driver | **done** | Unit tests green (`go test -race`), socket 0700/0600, live acceptance passed: gateway selected `applecontainer` (in_tree=false), CLI authenticated, `sandbox create` reached our CreateSandbox. Transcript in docs/acceptance.md. |
@@ -19,6 +19,8 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 | Release v0.1.0 | **done** | Tag `v0.1.0` pushed; release workflow green; assets published (`openshell-driver-applecontainer_0.1.0_darwin_arm64.tar.gz`, `checksums.txt`). |
 | Risk-fix round | **done** | Issues #1–#3 fixed and merged (console-tail diagnostics, startup preflight, driver-level kernel). |
 | One-command setup | **done** | `setup`/`uninstall` subcommands: launchd driver service, stock Homebrew gateway service wired via gateway.env, cert SAN, endpoint auto-derivation, image pre-pull. Live-verified including uninstall→setup round trip and KeepAlive restart. README rewritten quickstart-first. |
+| Release v0.2.0 | **done** | Tag `v0.2.0` (one-command setup + zero-config defaults + risk-fix round); release workflow green; assets published. |
+| Open-source prep | **in progress** | Governance set (MAINTAINERS, CODEOWNERS, code of conduct, templates), required DCO sign-off (hook + CI + web-commit setting), audit-driven doc fixes and code hardening. |
 
 ## Known quirks / risks
 

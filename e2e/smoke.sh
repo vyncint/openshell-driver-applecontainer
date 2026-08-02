@@ -1,8 +1,12 @@
 #!/bin/sh
 # Live smoke test: create -> Ready -> exec -> policy block -> delete.
 #
-# Prerequisites (this Mac only, never hosted CI):
-#   - the driver is running:   bin/openshell-driver-applecontainer --grpc-endpoint https://<vmnet-gw>:17670
+# Prerequisites (this Mac only, never hosted CI). The simplest way to satisfy
+# them is `openshell-driver-applecontainer setup`, which leaves both services
+# running. To drive the pieces by hand instead:
+#   - the driver is running:   bin/openshell-driver-applecontainer
+#         (the gateway endpoint is auto-derived from the vmnet network; pass
+#          --grpc-endpoint https://<vmnet-gw>:17670 only to override it)
 #   - the gateway is running:  openshell-gateway --bind-address 0.0.0.0 --enable-mtls-auth true \
 #                                --drivers applecontainer --compute-driver-socket /tmp/oshl-ac/driver.sock
 #   - the openshell CLI is registered against the gateway (openshell status works)
