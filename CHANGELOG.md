@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `update` and `cleanup` subcommands for one-command lifecycle management, mirroring
+  apple/container's `update-container.sh` / `uninstall-container.sh`. `update` downloads the
+  latest release (or `--version vX.Y.Z`), verifies its checksum, replaces the binary in place,
+  and re-runs `setup`; `--all` also updates OpenShell (brew) and apple/container, `--no-setup`
+  replaces the binary only. `cleanup` layers like the apple/container uninstaller: the bare
+  command removes only the driver's service and gateway wiring, `-d`/`--delete-data` also removes
+  the driver's state, vmnet network and pulled images (`-k`/`--keep-data` is the default), and
+  `--all` also removes OpenShell and apple/container. `uninstall` is now an alias for `cleanup`.
+
 ### Fixed
 
 - The `install.sh` one-line installer no longer aborts when the OpenShell installer it invokes

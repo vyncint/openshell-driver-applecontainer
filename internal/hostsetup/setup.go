@@ -37,6 +37,15 @@ type Setup struct {
 	BinPath    string
 	Exec       func(name string, args ...string) (string, error)
 	ExecStream func(name string, args ...string) error
+	// HasOpenShell probes whether the OpenShell Homebrew package is present.
+	// nil uses the real check; tests inject a stub.
+	HasOpenShell func() bool
+	// ACUninstaller is apple/container's own uninstaller script, run under
+	// `cleanup --all`. OpenShellVarDir is OpenShell's Homebrew var directory,
+	// removed under `cleanup --all -d`. Both default to their real host paths
+	// in New(); tests point them at temp dirs (or "" to skip).
+	ACUninstaller   string
+	OpenShellVarDir string
 	// readyTimeout bounds how long to wait for the driver socket after a
 	// (re)start; overridden in tests.
 	readyTimeout time.Duration
@@ -56,12 +65,14 @@ func New(rt backend.Runtime, log *slog.Logger) (*Setup, error) {
 		bin = resolved
 	}
 	return &Setup{
-		RT:           rt,
-		Log:          log,
-		Home:         home,
-		UID:          os.Getuid(),
-		BinPath:      bin,
-		readyTimeout: 15 * time.Second,
+		RT:              rt,
+		Log:             log,
+		Home:            home,
+		UID:             os.Getuid(),
+		BinPath:         bin,
+		ACUninstaller:   "/usr/local/bin/uninstall-container.sh",
+		OpenShellVarDir: "/opt/homebrew/var/openshell",
+		readyTimeout:    15 * time.Second,
 		Exec: func(name string, args ...string) (string, error) {
 			out, err := exec.Command(name, args...).CombinedOutput()
 			return string(out), err
@@ -152,9 +163,36 @@ func (s *Setup) Run(ctx context.Context, opts Options) error {
 	return nil
 }
 
-// Uninstall removes what setup installed (certificates, network, and images
-// are left in place — they are harmless and expensive to recreate).
-func (s *Setup) Uninstall() error {
+// CleanupOptions configures a cleanup run. The zero value reproduces the
+// historical `uninstall`: remove the driver service and its gateway wiring
+// but keep all data and prerequisites.
+type CleanupOptions struct {
+	// DeleteData also removes the driver's own data — its state directory,
+	// socket directory, the vmnet network, and the pulled sandbox/supervisor
+	// images. This is the "-d" (vs "-k") distinction from apple/container's
+	// uninstaller.
+	DeleteData bool
+	// All also removes the prerequisites the driver sits on: the OpenShell
+	// Homebrew package and apple/container (via its own installed
+	// uninstaller). Off by default — a plain cleanup only touches the driver.
+	All bool
+
+	// The following are resolved from config and consulted only when
+	// DeleteData is set.
+	Network         string
+	Socket          string
+	StateDir        string
+	DefaultImage    string
+	SupervisorImage string
+}
+
+// Cleanup reverses setup. With the zero-value options it removes the driver
+// launchd service and its gateway.env wiring and stops the gateway, leaving
+// data and prerequisites untouched (the historical `uninstall`). DeleteData
+// additionally removes the driver's own data; All additionally removes
+// OpenShell and apple/container.
+func (s *Setup) Cleanup(opts CleanupOptions) error {
+	// 1. Driver launchd service.
 	target := fmt.Sprintf("gui/%d/%s", s.UID, AgentLabel)
 	if out, err := s.Exec("launchctl", "bootout", target); err != nil {
 		s.Log.Debug("launchctl bootout", "out", out, "err", err)
@@ -162,8 +200,9 @@ func (s *Setup) Uninstall() error {
 	if err := os.Remove(s.agentPlistPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	s.Log.Info("uninstall: driver service removed")
+	s.Log.Info("cleanup: driver service removed")
 
+	// 2. gateway.env managed block (unmanaged lines are left in place).
 	envPath := filepath.Join(s.configDir(), "gateway.env")
 	if data, err := os.ReadFile(envPath); err == nil {
 		rest := RemoveManagedBlock(string(data))
@@ -172,17 +211,119 @@ func (s *Setup) Uninstall() error {
 		} else if err := os.WriteFile(envPath, []byte(rest), 0o600); err != nil {
 			return err
 		}
-		s.Log.Info("uninstall: gateway service configuration removed", "file", envPath)
+		s.Log.Info("cleanup: gateway service configuration removed", "file", envPath)
 	}
 
-	if s.brewHasOpenShell() {
-		s.Log.Info("uninstall: stopping the gateway service (it has no compute driver configured anymore)")
+	// 3. Stop the gateway — with the driver gone it has no compute backend.
+	// (When All uninstalls OpenShell below, `brew uninstall` stops it too;
+	// stopping here first keeps a plain cleanup tidy.)
+	if s.openShellInstalled() {
+		s.Log.Info("cleanup: stopping the gateway service")
 		if err := s.ExecStream("brew", "services", "stop", "openshell"); err != nil {
 			s.Log.Warn("brew services stop openshell failed", "err", err)
 		}
 	}
-	s.Log.Info("uninstall: done (certificates, vmnet network and images were kept)")
+
+	// 4. Driver-owned data.
+	if opts.DeleteData {
+		s.deleteDriverData(opts)
+	}
+
+	// 5. Prerequisites.
+	if opts.All {
+		s.removePrerequisites(opts)
+	}
+
+	switch {
+	case opts.DeleteData && opts.All:
+		s.Log.Info("cleanup: done (full teardown — driver, its data, OpenShell and apple/container)")
+	case opts.DeleteData:
+		s.Log.Info("cleanup: done (driver and its data removed; OpenShell and apple/container kept)")
+	case opts.All:
+		s.Log.Info("cleanup: done (driver, OpenShell and apple/container removed; driver data kept)")
+	default:
+		s.Log.Info("cleanup: done (driver removed; data, network, images and prerequisites kept)")
+	}
 	return nil
+}
+
+// deleteDriverData removes the driver's own state, socket directory, pulled
+// images and vmnet network. Best-effort: a missing target is not an error.
+func (s *Setup) deleteDriverData(opts CleanupOptions) {
+	if opts.StateDir != "" {
+		if err := os.RemoveAll(opts.StateDir); err != nil {
+			s.Log.Warn("cleanup: remove state dir", "dir", opts.StateDir, "err", err)
+		} else {
+			s.Log.Info("cleanup: removed driver state", "dir", opts.StateDir)
+		}
+	}
+	if opts.Socket != "" {
+		sockDir := filepath.Dir(opts.Socket)
+		if err := os.RemoveAll(sockDir); err != nil {
+			s.Log.Warn("cleanup: remove socket dir", "dir", sockDir, "err", err)
+		}
+	}
+	for _, ref := range []string{opts.DefaultImage, opts.SupervisorImage} {
+		if ref == "" {
+			continue
+		}
+		if out, err := s.Exec("container", "image", "rm", ref); err != nil {
+			s.Log.Debug("cleanup: remove image (may not be present)", "image", ref, "out", out, "err", err)
+		} else {
+			s.Log.Info("cleanup: removed image", "image", ref)
+		}
+	}
+	if opts.Network != "" {
+		if out, err := s.Exec("container", "network", "rm", opts.Network); err != nil {
+			s.Log.Debug("cleanup: remove network (may not be present)", "network", opts.Network, "out", out, "err", err)
+		} else {
+			s.Log.Info("cleanup: removed vmnet network", "network", opts.Network)
+		}
+	}
+}
+
+// removePrerequisites uninstalls OpenShell (Homebrew) and apple/container (via
+// its own installed uninstaller). apple/container's uninstaller needs sudo, so
+// it runs attached to the terminal to prompt for a password.
+func (s *Setup) removePrerequisites(opts CleanupOptions) {
+	if s.openShellInstalled() {
+		s.Log.Info("cleanup: uninstalling OpenShell (brew)")
+		if err := s.ExecStream("brew", "uninstall", "openshell"); err != nil {
+			s.Log.Warn("brew uninstall openshell failed", "err", err)
+		}
+	}
+	if opts.DeleteData {
+		// brew uninstall leaves OpenShell's user config (CLI gateway
+		// registrations) and its var dir (TLS/logs) behind.
+		dirs := []string{s.configDir()}
+		if s.OpenShellVarDir != "" {
+			dirs = append(dirs, s.OpenShellVarDir)
+		}
+		for _, dir := range dirs {
+			if err := os.RemoveAll(dir); err != nil {
+				s.Log.Warn("cleanup: remove OpenShell data", "dir", dir, "err", err)
+			}
+		}
+	}
+	if s.ACUninstaller == "" {
+		return
+	}
+	if _, err := os.Stat(s.ACUninstaller); err != nil {
+		s.Log.Info("cleanup: apple/container uninstaller not found; skipping it", "path", s.ACUninstaller)
+		return
+	}
+	// The uninstaller refuses to run while the runtime service is up.
+	if err := s.ExecStream("container", "system", "stop"); err != nil {
+		s.Log.Debug("container system stop", "err", err)
+	}
+	dataFlag := "-k"
+	if opts.DeleteData {
+		dataFlag = "-d"
+	}
+	s.Log.Info("cleanup: uninstalling apple/container (its uninstaller needs sudo)", "data", dataFlag)
+	if err := s.ExecStream(s.ACUninstaller, dataFlag); err != nil {
+		s.Log.Warn("apple/container uninstaller failed", "err", err)
+	}
 }
 
 func (s *Setup) ensureNetwork(ctx context.Context, name string) (string, error) {
@@ -331,7 +472,8 @@ func (s *Setup) installAgent(tlsDir, socket string) error {
 	return nil
 }
 
-func (s *Setup) brewHasOpenShell() bool {
+// brewHasOpenShell reports whether the OpenShell Homebrew package is installed.
+func brewHasOpenShell() bool {
 	if _, err := exec.LookPath("brew"); err != nil {
 		return false
 	}
@@ -339,8 +481,17 @@ func (s *Setup) brewHasOpenShell() bool {
 	return err == nil
 }
 
+// openShellInstalled is the probe used throughout setup/cleanup; it honors an
+// injected HasOpenShell stub and otherwise runs the real check.
+func (s *Setup) openShellInstalled() bool {
+	if s.HasOpenShell != nil {
+		return s.HasOpenShell()
+	}
+	return brewHasOpenShell()
+}
+
 func (s *Setup) restartGatewayService() {
-	if !s.brewHasOpenShell() {
+	if !s.openShellInstalled() {
 		s.Log.Warn("setup: Homebrew OpenShell service not found; start the gateway manually",
 			"hint", "openshell-gateway (it reads "+filepath.Join(s.configDir(), "gateway.env")+" via the service wrapper only; pass the equivalent flags when running by hand)")
 		return

@@ -54,17 +54,9 @@ func runSetup(args []string) int {
 	return 0
 }
 
-// runUninstall implements `openshell-driver-applecontainer uninstall`.
-func runUninstall(_ []string) int {
-	log := newLogger("info")
-	s, err := hostsetup.New(backend.NewCLI(log), log)
-	if err != nil {
-		log.Error("uninstall failed", "err", err)
-		return 1
-	}
-	if err := s.Uninstall(); err != nil {
-		log.Error("uninstall failed", "err", err)
-		return 1
-	}
-	return 0
+// runUninstall implements `openshell-driver-applecontainer uninstall`, a
+// backward-compatible alias for `cleanup` (driver only, data kept). Any
+// cleanup flags (-d/--delete-data, --all) still work through it.
+func runUninstall(args []string) int {
+	return runCleanup(args)
 }
