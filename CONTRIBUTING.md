@@ -1,5 +1,17 @@
 # Contributing
 
+Contributions are welcome. Maintainers (see [MAINTAINERS.md](MAINTAINERS.md)) review and
+merge pull requests; the [Code of Conduct](CODE_OF_CONDUCT.md) applies in all project spaces.
+
+## One-time repo setup
+
+```sh
+git config core.hooksPath .githooks
+```
+
+This enables two hooks: one appends the DCO `Signed-off-by` trailer to your commits
+automatically, the other rejects forbidden attribution patterns (see Commits below).
+
 ## Build and test
 
 ```sh
@@ -28,8 +40,18 @@ docs/acceptance.md for what those flows are expected to prove.
 ## Commits
 
 Conventional Commits (`feat:`, `fix:`, `docs:`, `ci:`, `test:`, `chore:`), small and
-coherent. The repo enforces a commit-msg hook (`git config core.hooksPath .githooks` is set
-locally; CI mirrors it). DCO-style `Signed-off-by` is welcome but optional.
+coherent.
+
+**DCO sign-off is required.** Every commit must carry a `Signed-off-by:` trailer matching
+its author ([Developer Certificate of Origin](https://developercertificate.org/)) — use
+`git commit -s`, or set `core.hooksPath .githooks` once and the trailer is added for you.
+Commits made through the GitHub web UI are signed off automatically (a repository setting).
+CI checks every pull request commit.
+
+**Commits are single-author.** Commit messages must not contain `Co-authored-by` or
+tool-attribution trailers of any kind — a commit-msg hook and the `commit-audit` CI job
+reject them across the whole history. Credit collaborators by splitting work into commits
+authored by each person instead.
 
 ## Compatibility discipline
 

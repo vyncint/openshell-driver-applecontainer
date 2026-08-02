@@ -231,6 +231,13 @@ openshell-driver-applecontainer setup
 <!-- TODO when public: enable the Homebrew tap section in .goreleaser.yaml and document
      `brew install` here (a private tap is useless). -->
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the build/test workflow, commit conventions, and
+the required DCO sign-off; [MAINTAINERS.md](MAINTAINERS.md) for who reviews and merges; and
+the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately per
+[SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE) (vendored proto attribution).

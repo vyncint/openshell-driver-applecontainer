@@ -15,7 +15,7 @@ Eight RPCs — well under this project's ~15-RPC kill criterion, and stable at t
 | `GetSandbox` | Point read; used by reconcile/delete recovery, not polled after create. |
 | `ListSandboxes` | Called every 60 s by the gateway reconcile loop (compute/mod.rs:264-265). |
 | `CreateSandbox` | Returns an **empty response**; accept-then-provision. Progress flows via WatchSandboxes. |
-| `StopSandbox` | **Never called by the gateway in v0.0.96** (no lifecycle callsite; verified full-tree). The managed VM driver returns `Unimplemented`. We implement it anyway (maps to `container stop`) for forward compatibility. |
+| `StopSandbox` | **Never called by the gateway in v0.0.96** (no lifecycle callsite; verified full-tree). The managed VM driver returns `Unimplemented`, and so do we (there is no caller to exercise a real implementation against). |
 | `DeleteSandbox` | Must return `deleted=true` iff a platform resource was removed; gateway branches on it (compute/mod.rs:906-923). |
 | `WatchSandboxes` | Server stream. Gateway reconnects on a **fixed 2 s** cadence after stream end/error (compute/mod.rs:1642,1675). Replay a full snapshot on stream open, then stream diffs. |
 
@@ -96,9 +96,11 @@ drivers only `socket_path`). Canonical env names from core/sandbox_env.rs:
 - Also set (parity with the docker/vm drivers): `OPENSHELL_SANDBOX` (name),
   `OPENSHELL_SSH_SOCKET_PATH=/run/openshell/ssh.sock`, `OPENSHELL_SANDBOX_COMMAND=sleep
   infinity`, `OPENSHELL_LOG_LEVEL`, `OPENSHELL_TELEMETRY_ENABLED`,
-  `OPENSHELL_USER_ENVIRONMENT=<json of user env>` (when non-empty), `HOME=/root`, `PATH=…`,
-  `TERM=xterm`. User env (template then spec, spec wins) is applied first; driver-owned keys
-  win last. `template.agent_socket_path`, when set, overrides the SSH socket path value.
+  `OPENSHELL_OCI_IMAGE_USER=<image USER>` (so the supervisor drops the workload to the image's
+  user), `OPENSHELL_USER_ENVIRONMENT=<json of user env>` (when non-empty), `HOME=/root`,
+  `PATH=…`, `TERM=xterm`. User env (template then spec, spec wins) is applied first;
+  driver-owned keys win last. `template.agent_socket_path`, when set, overrides the SSH socket
+  path value.
 - TLS material: the gateway's **shared client triple** (per-sandbox identity is the JWT, not
   the cert). Source on this machine: the gateway TLS state dir (`ca.crt`, `client/tls.crt`,
   `client/tls.key`; server/defaults.rs:19-38). Homebrew installs generate it via

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Append a DCO Signed-off-by trailer matching the repo identity when absent.
+# Merge and squash messages are left alone.
+case "${2:-}" in
+  merge|squash) exit 0 ;;
+esac
+name=$(git config user.name) || exit 0
+email=$(git config user.email) || exit 0
+[ -n "$name" ] && [ -n "$email" ] || exit 0
+if ! grep -qi "^Signed-off-by: " "$1"; then
+  printf '\nSigned-off-by: %s <%s>\n' "$name" "$email" >> "$1"
+fi
