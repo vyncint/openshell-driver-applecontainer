@@ -81,6 +81,42 @@ func TestExtractBinaryMissing(t *testing.T) {
 	}
 }
 
+// TestReplaceBinaryKeepsExecBit reproduces the regression where the replaced
+// binary landed non-executable: replaceBinary copies into an os.CreateTemp
+// file (0600) and OpenFile's mode is ignored for an existing file, so without
+// an explicit chmod the renamed target lost its exec bit and `update`'s
+// re-setup then failed with "permission denied".
+func TestReplaceBinaryKeepsExecBit(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "driver")
+	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newBin := filepath.Join(dir, "new")
+	if err := os.WriteFile(newBin, []byte("NEW-BINARY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := replaceBinary(target, newBin); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "NEW-BINARY" {
+		t.Errorf("content = %q, want NEW-BINARY", got)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("replaced binary mode = %o, want 755 (exec bit must survive)", info.Mode().Perm())
+	}
+}
+
 func TestVerifyChecksum(t *testing.T) {
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "app.tar.gz")

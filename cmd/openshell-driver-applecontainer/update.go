@@ -258,6 +258,13 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		_ = out.Close()
 		return err
 	}
+	// OpenFile's mode is ignored when dst already exists — and it does here:
+	// replaceBinary copies into an os.CreateTemp file (created 0600). Force
+	// the mode so the replaced binary keeps its exec bit.
+	if err := out.Chmod(mode); err != nil {
+		_ = out.Close()
+		return err
+	}
 	return out.Close()
 }
 
