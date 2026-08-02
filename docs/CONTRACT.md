@@ -182,19 +182,21 @@ Unknown keys are rejected (upstream drivers use deny_unknown_fields; we match).
 
 ## 10. Sandbox lifecycle state machine (driver-local)
 
-```
-            CreateSandbox
-                 │ validate → persist state.json record → return OK
-                 ▼
-   ┌────── PROVISIONING ── boot failed / record without VM ──► FAILED (Ready=False, terminal reason)
-   │  resolve image → build seed → container delete -f <name> → container run -d
-   ▼
- RUNNING (container state=running; Ready=True/BackendReady;
-          public Ready once supervisor connects)
-   │  container stop (external) → Ready=False/ContainerExited (terminal)
-   ▼
- DeleteSandbox: deleting=true → cancel in-flight provision → container delete -f
-   → remove state dir → WatchSandboxesDeletedEvent
+```mermaid
+stateDiagram-v2
+  [*] --> Provisioning: CreateSandbox (validate · persist record · return OK)
+  Provisioning --> Running: resolve image · build seed · container run -d
+  Provisioning --> Failed: boot failed / record without VM (terminal)
+  Running --> Exited: container stopped externally · ContainerExited (terminal)
+  Running --> Deleting: DeleteSandbox
+  Exited --> Deleting: DeleteSandbox
+  Failed --> Deleting: DeleteSandbox
+  Deleting --> [*]: cancel in-flight · container delete -f · remove state · Deleted event
+
+  note right of Running
+    container state=running · Ready=True/BackendReady
+    public Ready once the supervisor connects
+  end note
 ```
 
 Restart reconcile: scan records ↔ `container ls -a`; adopt running VMs (apple/container VMs

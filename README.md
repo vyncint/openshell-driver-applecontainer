@@ -92,23 +92,34 @@ supervisor + TLS material + environment, manages lifecycle state, and cleans up.
 
 ## Architecture
 
+```mermaid
+flowchart TB
+  cli["openshell CLI"]
+  subgraph host["Mac host"]
+    gw["openshell-gateway<br/>selects the applecontainer driver"]
+    drv["openshell-driver-applecontainer<br/>grpcsvc · state · seed · backend"]
+    api["apple/container apiserver"]
+    seed["/openshell-seed · virtiofs ro<br/>supervisor · TLS · JWT · boot.sh"]
+    subgraph vm["micro-VM · own kernel · vmnet IP"]
+      sup["openshell-sandbox supervisor · root"]
+      wl["workload · image user"]
+      sup --> wl
+    end
+  end
+  cli -->|mTLS| gw
+  gw -->|"gRPC · unix socket 0600"| drv
+  drv -->|"exec container"| api
+  api -->|boots| vm
+  drv -.->|writes| seed
+  seed -.->|"virtiofs ro"| vm
+  sup -->|"dials back · mTLS / vmnet"| gw
+  classDef ours fill:#2563eb,color:#ffffff,stroke:#1d4ed8,stroke-width:1px;
+  class drv ours
 ```
-                     ┌──────────────────────────── Mac host ────────────────────────────┐
-                     │                                                                   │
- openshell CLI ──mTLS──► openshell-gateway ──gRPC/unix socket──► openshell-driver-       │
-                     │        ▲   (selects driver "applecontainer")   applecontainer     │
-                     │        │                                        │ exec `container`│
-                     │        │                                        ▼                 │
-                     │        │                              apple/container apiserver   │
-                     │        │                                        │                 │
-                     │        │ supervisor dials back                  ▼ boots           │
-                     │        │ (mTLS, vmnet)                ┌─── micro-VM (own kernel) ─┐
-                     │        └──────────────────────────────│ openshell-sandbox         │
-                     │                                       │  supervisor (root)        │
-                     │   /openshell-seed (virtiofs, ro):     │   └─ workload (image user)│
-                     │   supervisor bin, TLS, token, boot.sh └───────────────────────────┘
-                     └───────────────────────────────────────────────────────────────────┘
-```
+
+The gateway selects the driver over a Unix socket and stays lifecycle-only: **exec and
+`connect` traffic ride the in-guest supervisor's own dialed-back gateway connection, so the
+driver has no data plane.**
 
 Per sandbox, the driver: persists the accepted launch record, extracts the release-matched
 supervisor binary (cached by image digest), builds a read-only seed directory (supervisor,

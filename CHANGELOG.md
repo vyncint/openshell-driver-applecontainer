@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Replaced the ASCII architecture diagrams with Mermaid (topology, create flow, lifecycle, and
+  reconcile) in the README, `docs/architecture.md`, and `docs/CONTRACT.md` — GitHub renders
+  them natively.
+
 ## [0.2.2] - 2026-08-02
 
 ### Added
