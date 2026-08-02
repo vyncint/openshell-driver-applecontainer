@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The `install.sh` one-line installer no longer aborts when the OpenShell installer it invokes
+  reports its gateway as unreachable. That health check cannot pass until the driver's `setup`
+  runs afterwards, so its non-zero exit is expected; the installer now tolerates it (after
+  confirming the `openshell` binary was installed) and continues on to install the driver and
+  run `setup`, which brings the gateway up. Without this, a fresh `curl … | sh` left OpenShell
+  and apple/container installed but the driver never set up.
+
 ## [0.2.3] - 2026-08-02
 
 ### Fixed

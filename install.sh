@@ -137,7 +137,12 @@ check_openshell() {
 	fi
 	info "OpenShell is not installed (https://github.com/NVIDIA/OpenShell)"
 	if confirm "Install OpenShell now (runs the official installer)?"; then
-		curl -LsSf "$OPENSHELL_INSTALL_URL" | sh
+		# The official installer starts and health-checks the gateway, which
+		# cannot pass until this driver's `setup` runs afterwards — so a
+		# non-zero exit here is expected. Tolerate it and verify the binary
+		# landed instead; `setup` (run later) brings the gateway up.
+		curl -LsSf "$OPENSHELL_INSTALL_URL" | sh || true
+		need openshell || err "OpenShell installation failed"
 	else
 		err "OpenShell is required"
 	fi
