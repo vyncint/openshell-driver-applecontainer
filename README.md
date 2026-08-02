@@ -157,6 +157,7 @@ source of truth. See [docs/architecture.md](docs/architecture.md).
 | anything looks broken | re-run `openshell-driver-applecontainer setup` — it repairs all wiring |
 | `openshell status` fails | `brew services info openshell`; gateway log: `/opt/homebrew/var/log/openshell/openshell-gateway.err.log` |
 | sandbox stuck / failed | driver log: `~/Library/Logs/openshell-driver-applecontainer.log`; failed sandboxes carry the guest console tail in their status |
+| `default kernel not configured for architecture` | apple/container has no guest kernel (a fresh install, or one whose data was deleted). `setup` installs one automatically; if its download failed, retry `container system kernel set --recommended` |
 | slow first create | the base image (~2.6 GB) is pulling; `setup` without `--no-pull` pre-pulls it |
 
 ## Configuration reference

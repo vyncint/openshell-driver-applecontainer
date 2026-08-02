@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -112,6 +113,12 @@ func (s *Setup) Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("the apple/container runtime is not available (install it from https://github.com/apple/container): %w", err)
 		}
 	}
+
+	// 1b. Default guest kernel. apple/container cannot boot any VM without
+	// one, and a fresh install (or one whose user data was deleted, e.g. by
+	// `cleanup --all -d`) ships without it — every sandbox create would fail
+	// with "default kernel not configured for architecture".
+	s.ensureKernel()
 
 	// 2. vmnet network + guest-reachable gateway address.
 	gatewayIP, err := s.ensureNetwork(ctx, opts.Network)
@@ -324,6 +331,36 @@ func (s *Setup) removePrerequisites(opts CleanupOptions) {
 	if err := s.ExecStream(s.ACUninstaller, dataFlag); err != nil {
 		s.Log.Warn("apple/container uninstaller failed", "err", err)
 	}
+}
+
+// defaultKernelPath is where apple/container records the default guest kernel
+// for this architecture (a symlink into its kernels directory).
+func (s *Setup) defaultKernelPath() string {
+	return filepath.Join(s.Home, "Library", "Application Support", "com.apple.container",
+		"kernels", "default.kernel-"+runtime.GOARCH)
+}
+
+// ensureKernel installs apple/container's recommended guest kernel when no
+// default is configured. Without it every sandbox create fails at image
+// unpack with "default kernel not configured for architecture".
+//
+// This is deliberately non-fatal: setup is the documented repair command, so a
+// transient download failure must not stop it from fixing the rest of the
+// wiring. It warns with the exact manual fallback instead.
+func (s *Setup) ensureKernel() {
+	if _, err := os.Lstat(s.defaultKernelPath()); err == nil {
+		return
+	}
+	s.Log.Info("setup: no default guest kernel configured; installing the recommended one (one-time, ~600 MB)")
+	err := s.ExecStream("container", "system", "kernel", "set", "--recommended")
+	if err == nil {
+		s.Log.Info("setup: default guest kernel installed")
+		return
+	}
+	s.Log.Warn("setup: could not install the recommended guest kernel — SANDBOXES WILL NOT BOOT until one is set",
+		"err", err,
+		"retry", "container system kernel set --recommended",
+		"fallback", "download the kata-static arm64 tarball with curl, then: container system kernel set --arch arm64 --tar <file> --binary opt/kata/share/kata-containers/vmlinux-<version>")
 }
 
 func (s *Setup) ensureNetwork(ctx context.Context, name string) (string, error) {

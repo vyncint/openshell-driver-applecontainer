@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `setup` now installs apple/container's recommended guest kernel when no default is configured.
+  apple/container cannot boot any VM without one, so on a fresh install — or one whose user data
+  was deleted, which `cleanup --all -d` does by design — every sandbox create failed at image
+  unpack with `default kernel not configured for architecture arm64`. The step is skipped when a
+  kernel is already set, and a failed download only warns (with the retry command) so `setup`
+  still repairs the rest of the wiring.
+- `update --all` now stops the container runtime before running apple/container's updater and
+  restarts it afterwards. The updater refuses to run while the runtime is up, so this step
+  previously always failed with "`container` is still running".
+
 ## [0.2.5] - 2026-08-02
 
 ### Fixed
