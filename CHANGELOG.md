@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-02
+
 ### Added
 
 - Open-source governance set: MAINTAINERS.md, CODEOWNERS, Contributor Covenant code of
@@ -13,6 +15,19 @@ All notable changes to this project are documented here. The format follows
 - DCO sign-off is now required for contributions: `Signed-off-by` enforced on pull-request
   commits by a new `dco` CI job, added automatically by the repo's `prepare-commit-msg` hook,
   and applied to web-UI commits by a repository setting.
+
+### Fixed
+
+- Supervisor extraction is now concurrency-safe. Two concurrent first-time sandbox creates
+  could previously race on a shared extraction-container name and temp file, failing one
+  create or caching a truncated supervisor binary that every later sandbox would reuse.
+- A canceled or short-deadline `DeleteSandbox` no longer leaves a half-removed sandbox that
+  the poller skips and a restart re-adopts; teardown runs under a detached, bounded context.
+- Hardened host-facing inputs surfaced by a pre-release audit: the socket directory is
+  verified to be a non-symlink owned by the current user; `gateway.env` values are
+  shell-quoted; endpoints that are unspecified addresses (`0.0.0.0` / `::`) and flag-like
+  image references are rejected; the `gateway.env` managed-block parser tolerates CRLF and
+  duplicate blocks.
 
 ## [0.2.0] - 2026-08-02
 
@@ -52,6 +67,7 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vyncint/openshell-driver-applecontainer/releases/tag/v0.1.0
