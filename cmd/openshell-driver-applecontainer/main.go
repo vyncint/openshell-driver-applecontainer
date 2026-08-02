@@ -167,7 +167,7 @@ func listenUnix(path string) (net.Listener, error) {
 	if err := verifyOwnedDir(dir); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- 0700 on a directory: owner needs the traverse/exec bit
 		return nil, fmt.Errorf("restrict socket dir: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil {

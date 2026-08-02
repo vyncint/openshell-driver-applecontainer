@@ -211,7 +211,7 @@ func (f *Fake) CopyFrom(_ context.Context, name, _, hostPath string) error {
 	if data == nil {
 		data = []byte{0x7f, 'E', 'L', 'F', 0, 0, 0, 0}
 	}
-	return os.WriteFile(hostPath, data, 0o644)
+	return os.WriteFile(hostPath, data, 0o600)
 }
 
 func (f *Fake) Networks(_ context.Context) ([]Network, error) {

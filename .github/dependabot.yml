@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Go module dependencies.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions, pinned to commit SHAs — Dependabot bumps the SHA and
+  # keeps the "# vX.Y.Z" comment in sync.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci(deps)"
