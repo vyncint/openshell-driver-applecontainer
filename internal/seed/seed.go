@@ -30,9 +30,20 @@ const SupervisorImagePath = "/openshell-sandbox"
 // bootScript copies the supervisor to a writable path and restores the
 // executable bit before exec'ing it: `container cp` drops the bit, and the
 // copy also keeps working if seed mounts ever gain noexec semantics.
+//
+// It also installs an optional network-policy overlay over the image's
+// baked-in /etc/openshell/policy.yaml, if the operator supplied one. This
+// step runs as root before the supervisor starts (and before it applies
+// any guest-side filesystem restriction to itself or the workload), which
+// is the only point at which that file is writable — the shipped policy
+// marks /etc read-only for the workload once the supervisor is running.
 const bootScript = `#!/bin/sh
 set -eu
 mkdir -p /opt/openshell/bin /run/openshell
+if [ -f /openshell-seed/policy.yaml ]; then
+	mkdir -p /etc/openshell
+	cp /openshell-seed/policy.yaml /etc/openshell/policy.yaml
+fi
 cp /openshell-seed/openshell-sandbox /opt/openshell/bin/openshell-sandbox
 chmod 0755 /opt/openshell/bin/openshell-sandbox
 exec /opt/openshell/bin/openshell-sandbox
@@ -209,6 +220,13 @@ type Materials struct {
 	CertPath       string // shared client certificate
 	KeyPath        string // shared client key
 	Token          string // per-sandbox JWT; may be empty
+	// PolicyOverlayPath, when set, is a host path to a policy.yaml that
+	// replaces the sandbox image's baked-in /etc/openshell/policy.yaml at
+	// boot. This is a driver-operator control (see config.Config's
+	// --network-policy-file), never something a per-sandbox request can
+	// set: it changes what the guest's own security policy is, for every
+	// sandbox this driver instance boots.
+	PolicyOverlayPath string
 }
 
 // Write populates dir (created 0700) with the seed layout:
@@ -217,6 +235,7 @@ type Materials struct {
 //	boot.sh             boot shim (0755)
 //	tls/ca.crt tls/tls.crt (0644), tls/tls.key (0600)
 //	auth/sandbox.jwt    token file (0600), only when a token is present
+//	policy.yaml         network-policy overlay (0600), only when configured
 func Write(dir string, m Materials) error {
 	for _, d := range []string{dir, filepath.Join(dir, "tls"), filepath.Join(dir, "auth")} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
@@ -246,6 +265,11 @@ func Write(dir string, m Materials) error {
 	if m.Token != "" {
 		if err := os.WriteFile(filepath.Join(dir, "auth", "sandbox.jwt"), []byte(m.Token+"\n"), 0o600); err != nil {
 			return fmt.Errorf("seed: write token: %w", err)
+		}
+	}
+	if m.PolicyOverlayPath != "" {
+		if err := copyFile(m.PolicyOverlayPath, filepath.Join(dir, "policy.yaml")); err != nil {
+			return err
 		}
 	}
 	return nil

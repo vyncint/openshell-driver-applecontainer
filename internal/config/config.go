@@ -61,6 +61,15 @@ type Config struct {
 	// network override may select, in addition to Network. Empty means only
 	// Network is permitted.
 	AllowedNetworks []string
+	// NetworkPolicyFile, when set, is a host path to a policy.yaml that
+	// replaces the sandbox image's baked-in /etc/openshell/policy.yaml for
+	// every sandbox this driver instance boots — e.g. to allowlist
+	// additional egress a tool's self-updater needs. This is a driver-wide,
+	// operator-only control: it is never settable per sandbox, since it
+	// changes the guest's own security policy, not just this driver's.
+	// Start from the image's shipped policy and add entries; replacing it
+	// with something permissive weakens every sandbox's sandboxing.
+	NetworkPolicyFile string
 	// LogLevel is the driver's own log level (debug|info|warn|error) and
 	// the default OPENSHELL_LOG_LEVEL for sandboxes without one.
 	LogLevel string
@@ -157,6 +166,7 @@ func Parse(args []string) (Config, error) {
 	fs.BoolVar(&cfg.AllowHostMounts, "allow-host-mounts", envOrBool("ALLOW_HOST_MOUNTS", false), "permit per-sandbox driver-config volume mounts of host directories (off by default)")
 	fs.StringVar(&cfg.HostMountRoot, "host-mount-root", envOr("HOST_MOUNT_ROOT", ""), "when set, volume-mount sources must live under this directory")
 	allowedNetworks := fs.String("allowed-networks", envOr("ALLOWED_NETWORKS", ""), "comma-separated vmnet networks a sandbox may select via driver config, in addition to --network")
+	fs.StringVar(&cfg.NetworkPolicyFile, "network-policy-file", envOr("NETWORK_POLICY_FILE", ""), "host path to a policy.yaml that replaces the sandbox image's network policy for every sandbox (operator-only; see SECURITY.md)")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOr("LOG_LEVEL", "info"), "log level: debug|info|warn|error")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
@@ -170,6 +180,9 @@ func Parse(args []string) (Config, error) {
 	}
 	if cfg.HostMountRoot != "" && !filepath.IsAbs(cfg.HostMountRoot) {
 		return Config{}, fmt.Errorf("config: --host-mount-root must be an absolute path")
+	}
+	if cfg.NetworkPolicyFile != "" && !filepath.IsAbs(cfg.NetworkPolicyFile) {
+		return Config{}, fmt.Errorf("config: --network-policy-file must be an absolute path")
 	}
 	return cfg, nil
 }

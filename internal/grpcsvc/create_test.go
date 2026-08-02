@@ -360,6 +360,46 @@ func TestMissingDefaultKernelFailsProvisioning(t *testing.T) {
 	}
 }
 
+func TestMissingNetworkPolicyFileFailsProvisioning(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	srv.cfg.NetworkPolicyFile = "/nonexistent/policy.yaml"
+	client := dialTestServer(t, srv)
+
+	if _, err := client.CreateSandbox(context.Background(), createRequest()); err != nil {
+		t.Fatal(err)
+	}
+	cond := waitForCondition(t, srv, reasonProvisioningFailed)
+	if !strings.Contains(cond.Message, "network policy file") || !strings.Contains(cond.Message, "/nonexistent/policy.yaml") {
+		t.Errorf("failure message must name the policy file path, got %q", cond.Message)
+	}
+}
+
+func TestNetworkPolicyOverlaySeeded(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	policyPath := filepath.Join(t.TempDir(), "policy.yaml")
+	if err := os.WriteFile(policyPath, []byte("version: 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.cfg.NetworkPolicyFile = policyPath
+	client := dialTestServer(t, srv)
+
+	if _, err := client.CreateSandbox(context.Background(), createRequest()); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, srv, reasonBackendReady)
+
+	seedDir := filepath.Join(srv.store.SandboxDir(testSandboxID), "seed")
+	got, err := os.ReadFile(filepath.Join(seedDir, "policy.yaml"))
+	if err != nil {
+		t.Fatalf("policy overlay not seeded: %v", err)
+	}
+	if string(got) != "version: 1\n" {
+		t.Errorf("seeded policy content = %q", got)
+	}
+}
+
 func TestValidateRejectsBadDriverConfigAndResources(t *testing.T) {
 	client := dialTestServer(t, newTestServer(t))
 	ctx := context.Background()

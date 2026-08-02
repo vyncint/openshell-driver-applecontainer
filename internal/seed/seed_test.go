@@ -185,6 +185,16 @@ func TestWriteSeedDir(t *testing.T) {
 			t.Errorf("boot.sh missing %q", want)
 		}
 	}
+	// The boot shim only installs the policy overlay when one exists in the
+	// seed dir, and does so before starting the supervisor.
+	for _, want := range []string{
+		"if [ -f /openshell-seed/policy.yaml ]",
+		"cp /openshell-seed/policy.yaml /etc/openshell/policy.yaml",
+	} {
+		if !strings.Contains(string(boot), want) {
+			t.Errorf("boot.sh missing policy-overlay step %q", want)
+		}
+	}
 	token, err := os.ReadFile(filepath.Join(dir, "auth", "sandbox.jwt"))
 	if err != nil || string(token) != "tok\n" {
 		t.Errorf("token = %q, %v", token, err)
@@ -217,5 +227,49 @@ func TestWriteSeedDirWithoutToken(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "auth", "sandbox.jwt")); !os.IsNotExist(err) {
 		t.Errorf("token file should not exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "policy.yaml")); !os.IsNotExist(err) {
+		t.Errorf("policy overlay should not exist when unconfigured: %v", err)
+	}
+}
+
+func TestWriteSeedDirWithPolicyOverlay(t *testing.T) {
+	src := t.TempDir()
+	for _, name := range []string{"sup", "ca.crt", "tls.crt", "tls.key"} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policyPath := filepath.Join(src, "custom-policy.yaml")
+	policyContent := "version: 1\nnetwork_policies:\n  claude_code:\n    endpoints: []\n"
+	if err := os.WriteFile(policyPath, []byte(policyContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "seed")
+	err := Write(dir, Materials{
+		SupervisorPath:    filepath.Join(src, "sup"),
+		CAPath:            filepath.Join(src, "ca.crt"),
+		CertPath:          filepath.Join(src, "tls.crt"),
+		KeyPath:           filepath.Join(src, "tls.key"),
+		PolicyOverlayPath: policyPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "policy.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != policyContent {
+		t.Errorf("policy overlay content = %q, want %q", got, policyContent)
+	}
+	info, err := os.Stat(filepath.Join(dir, "policy.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("policy overlay perms = %o, want 600", info.Mode().Perm())
 	}
 }
