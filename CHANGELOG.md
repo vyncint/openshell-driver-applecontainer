@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-02
+
 ### Fixed
 
 - `setup` now installs apple/container's recommended guest kernel when no default is configured.
@@ -174,7 +176,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.2...v0.2.3
