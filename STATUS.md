@@ -20,7 +20,7 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
 | Risk-fix round | **done** | Issues #1–#3 fixed and merged (console-tail diagnostics, startup preflight, driver-level kernel). |
 | One-command setup | **done** | `setup`/`uninstall` subcommands: launchd driver service, stock Homebrew gateway service wired via gateway.env, cert SAN, endpoint auto-derivation, image pre-pull. Live-verified including uninstall→setup round trip and KeepAlive restart. README rewritten quickstart-first. |
 | Release v0.2.0 | **done** | Tag `v0.2.0` (one-command setup + zero-config defaults + risk-fix round); release workflow green; assets published. |
-| Open-source prep | **in progress** | Governance set (MAINTAINERS, CODEOWNERS, code of conduct, templates), required DCO sign-off (hook + CI + web-commit setting), audit-driven doc fixes and code hardening. |
+| Open-source prep | **done** | Governance set (MAINTAINERS, CODEOWNERS, code of conduct, templates), required DCO sign-off (hook + CI + web-commit setting), full secrets/history audit (clean), audit-driven doc fixes and code hardening — released as v0.2.1. Two design-decision follow-ups filed as issues (host-mount / network-override allowlists). |
 
 ## Known quirks / risks
 
