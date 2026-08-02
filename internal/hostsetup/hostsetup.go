@@ -72,15 +72,24 @@ func RenderLaunchAgent(binPath, tlsDir, logPath string) string {
 }
 
 // GatewayEnvLines returns the managed settings the stock gateway service
-// needs to select this driver and be reachable from guest VMs.
+// needs to select this driver and be reachable from guest VMs. Path values
+// are single-quoted because the gateway service wrapper `source`s this file
+// as a shell script, so a space or shell metacharacter in a path would
+// otherwise break parsing or inject.
 func GatewayEnvLines(socket, tlsDir string) []string {
 	return []string{
 		"OPENSHELL_DRIVERS=applecontainer",
-		"OPENSHELL_COMPUTE_DRIVER_SOCKET=" + socket,
+		"OPENSHELL_COMPUTE_DRIVER_SOCKET=" + shellQuote(socket),
 		"OPENSHELL_BIND_ADDRESS=0.0.0.0",
 		"OPENSHELL_ENABLE_MTLS_AUTH=true",
-		"OPENSHELL_LOCAL_TLS_DIR=" + tlsDir,
+		"OPENSHELL_LOCAL_TLS_DIR=" + shellQuote(tlsDir),
 	}
+}
+
+// shellQuote wraps a value in single quotes, escaping embedded single
+// quotes, so it is a single safe token when the file is sourced by /bin/sh.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // UpsertManagedBlock replaces (or appends) the managed marker block in a
@@ -98,24 +107,29 @@ func UpsertManagedBlock(existing string, lines []string) string {
 }
 
 // RemoveManagedBlock strips the managed marker block (inclusive) from a
-// gateway.env file's content.
+// gateway.env file's content. It removes every managed block (a degenerate
+// file may contain more than one) and tolerates CRLF line endings.
 func RemoveManagedBlock(existing string) string {
-	begin := strings.Index(existing, blockBegin)
-	if begin < 0 {
-		return existing
+	for {
+		begin := strings.Index(existing, blockBegin)
+		if begin < 0 {
+			return existing
+		}
+		end := strings.Index(existing[begin:], blockEnd)
+		if end < 0 {
+			// Damaged block (no end marker): drop from begin onward.
+			return strings.TrimRight(existing[:begin], "\r\n") + "\n"
+		}
+		rest := existing[begin+end+len(blockEnd):]
+		rest = strings.TrimPrefix(rest, "\r")
+		rest = strings.TrimPrefix(rest, "\n")
+		head := existing[:begin]
+		if strings.TrimSpace(head) == "" {
+			existing = rest
+		} else {
+			existing = head + rest
+		}
 	}
-	end := strings.Index(existing[begin:], blockEnd)
-	if end < 0 {
-		// Damaged block: drop from the begin marker onward.
-		return strings.TrimRight(existing[:begin], "\n") + "\n"
-	}
-	rest := existing[begin+end+len(blockEnd):]
-	rest = strings.TrimPrefix(rest, "\n")
-	head := existing[:begin]
-	if strings.TrimSpace(head) == "" {
-		return rest
-	}
-	return head + rest
 }
 
 // CertHasIPSAN reports whether the PEM certificate carries a subject

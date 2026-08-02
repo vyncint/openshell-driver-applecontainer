@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
@@ -66,6 +67,72 @@ func TestExtractorRejectsNonELF(t *testing.T) {
 	ex := &Extractor{RT: fake, CacheDir: t.TempDir()}
 	if _, err := ex.Ensure(context.Background(), supImage); err == nil || !strings.Contains(err.Error(), "ELF") {
 		t.Errorf("want ELF validation error, got %v", err)
+	}
+}
+
+func TestEnsureConcurrentColdCache(t *testing.T) {
+	fake := &backend.Fake{}
+	fake.AddImage(supImage, "sha256:concurrent00")
+	ex := &Extractor{RT: fake, CacheDir: t.TempDir(), Labels: map[string]string{"managed": "yes"}}
+
+	const n = 8
+	var wg sync.WaitGroup
+	paths := make([]string, n)
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // maximize the race window
+			paths[i], errs[i] = ex.Ensure(context.Background(), supImage)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := 0; i < n; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d failed: %v", i, errs[i])
+		}
+		if paths[i] != paths[0] {
+			t.Errorf("goroutine %d got %q, want %q", i, paths[i], paths[0])
+		}
+	}
+	// The cached binary is the full expected content, not a truncated race
+	// artifact, and no extraction container leaked.
+	data, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 4 || string(data[:4]) != "\x7fELF" {
+		t.Errorf("cached binary is not a valid ELF (%d bytes)", len(data))
+	}
+	list, err := fake.List(context.Background(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 0 {
+		t.Errorf("extraction container(s) leaked: %+v", list)
+	}
+}
+
+func TestExtractionContainerCarriesLabels(t *testing.T) {
+	fake := &backend.Fake{}
+	fake.AddImage(supImage, "sha256:labeltest0")
+	ex := &Extractor{RT: fake, CacheDir: t.TempDir(), Labels: map[string]string{"openshell.ai/managed-by": "x"}}
+	if _, err := ex.Ensure(context.Background(), supImage); err != nil {
+		t.Fatal(err)
+	}
+	calls := fake.RunCalls()
+	if len(calls) != 1 {
+		t.Fatalf("want 1 run, got %d", len(calls))
+	}
+	if calls[0].Labels["openshell.ai/managed-by"] != "x" {
+		t.Errorf("extraction container missing managed-by label: %+v", calls[0].Labels)
+	}
+	if !strings.HasPrefix(calls[0].Name, "oshl-extract-") {
+		t.Errorf("extraction name = %q", calls[0].Name)
 	}
 }
 

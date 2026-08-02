@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
 )
@@ -44,7 +46,16 @@ type Extractor struct {
 	RT       backend.Runtime
 	CacheDir string
 	Log      *slog.Logger
+	// Labels are applied to the transient extraction container so a leak
+	// (process killed mid-extraction) is reclaimed by orphan cleanup.
+	Labels map[string]string
+
+	mu sync.Mutex // serializes extraction so concurrent creates don't race
 }
+
+// extractSeq disambiguates concurrent extraction containers and temp files
+// across goroutines and processes, together with the pid.
+var extractSeq atomic.Uint64
 
 // sanitizeRef makes an image reference safe as a directory name component.
 func sanitizeRef(ref string) string {
@@ -70,7 +81,9 @@ func shortDigest(digest string) string {
 }
 
 // Ensure returns the host path of the cached supervisor binary, extracting
-// it first when the cache misses.
+// it first when the cache misses. It is safe for concurrent callers: the
+// fast path is lock-free, and extraction is serialized so concurrent
+// cold-cache creates cannot race on the container name or the temp file.
 func (e *Extractor) Ensure(ctx context.Context, image string) (string, error) {
 	digest, err := e.ensureImage(ctx, image)
 	if err != nil {
@@ -81,19 +94,29 @@ func (e *Extractor) Ensure(ctx context.Context, image string) (string, error) {
 	if _, err := os.Stat(binPath); err == nil {
 		return binPath, nil
 	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	// Another goroutine may have extracted it while we waited for the lock.
+	if _, err := os.Stat(binPath); err == nil {
+		return binPath, nil
+	}
 	if err := os.MkdirAll(filepath.Dir(binPath), 0o700); err != nil {
 		return "", fmt.Errorf("seed: create cache dir: %w", err)
 	}
 
-	// The binary can only be copied out of a RUNNING container, so boot the
-	// image with a harmless entrypoint, copy, and always tear down.
-	tmpName := "oshl-extract-" + shortDigest(digest)
-	_ = e.RT.Delete(ctx, tmpName) // clear any leftover from a crashed run
+	// A unique per-attempt name (so it can never collide with a sandbox
+	// container "oshl-<id>" or another extraction) plus labels so a leak
+	// is reclaimed by orphan cleanup. The binary can only be copied out of
+	// a RUNNING container, so boot with a harmless entrypoint and tear down.
+	uniq := fmt.Sprintf("%s-%d-%d", shortDigest(digest), os.Getpid(), extractSeq.Add(1))
+	tmpName := "oshl-extract-" + uniq
 	if _, err := e.RT.Run(ctx, backend.RunSpec{
 		Name:       tmpName,
 		Image:      image,
 		Entrypoint: "/bin/sleep",
 		Args:       []string{"300"},
+		Labels:     e.Labels,
 	}); err != nil {
 		return "", fmt.Errorf("seed: start extraction container: %w", err)
 	}
@@ -105,12 +128,12 @@ func (e *Extractor) Ensure(ctx context.Context, image string) (string, error) {
 		}
 	}()
 
-	tmpFile := binPath + ".partial"
+	tmpFile := binPath + ".partial-" + uniq
 	if err := e.RT.CopyFrom(ctx, tmpName, SupervisorImagePath, tmpFile); err != nil {
 		return "", fmt.Errorf("seed: copy supervisor from image: %w", err)
 	}
+	defer func() { _ = os.Remove(tmpFile) }() // no-op after a successful rename
 	if err := validateELF(tmpFile); err != nil {
-		_ = os.Remove(tmpFile)
 		return "", err
 	}
 	if err := os.Chmod(tmpFile, 0o755); err != nil {

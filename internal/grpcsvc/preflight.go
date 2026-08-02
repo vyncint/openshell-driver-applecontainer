@@ -113,14 +113,15 @@ func ensureNetwork(ctx context.Context, name string, rt backend.Runtime, log *sl
 	return ""
 }
 
-// isLoopbackHost reports whether an endpoint hostname can only ever resolve
-// to the host's own loopback.
+// isLoopbackHost reports whether an endpoint hostname can never be reached
+// from a guest VM: loopback, or an unspecified bind address (0.0.0.0 / ::)
+// which is not a routable destination.
 func isLoopbackHost(host string) bool {
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
+		return ip.IsLoopback() || ip.IsUnspecified()
 	}
 	return false
 }
