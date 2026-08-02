@@ -225,9 +225,19 @@ func updatePrerequisites(log *slog.Logger) {
 	}
 	const acUpdater = "/usr/local/bin/update-container.sh"
 	if _, err := os.Stat(acUpdater); err == nil {
+		// The updater refuses to run while the runtime is up ("`container` is
+		// still running"), so stop it first — same as the uninstall path does.
+		if err := streamCmd("container", "system", "stop"); err != nil {
+			log.Debug("container system stop", "err", err)
+		}
 		log.Info("update: updating apple/container (its updater needs sudo)")
 		if err := streamCmd(acUpdater); err != nil {
 			log.Warn("apple/container updater failed", "err", err)
+		}
+		// Bring the runtime back up; the driver needs it. (setup would also
+		// start it, but --no-setup must not leave it stopped.)
+		if err := streamCmd("container", "system", "start"); err != nil {
+			log.Warn("could not restart the container runtime; run `container system start`", "err", err)
 		}
 	}
 }

@@ -176,6 +176,40 @@ func TestCleanupAllDeleteDataPassesDeleteFlag(t *testing.T) {
 	}
 }
 
+// A fresh apple/container install (or one whose user data was deleted by
+// `cleanup --all -d`) has no default kernel, and then every sandbox create
+// fails at image unpack. setup must install one.
+func TestEnsureKernelInstallsWhenMissing(t *testing.T) {
+	rec := &cmdRec{}
+	s := newCleanupSetup(t, rec, true) // Home is a temp dir: no kernel present
+
+	s.ensureKernel()
+
+	if !rec.ran("container system kernel set --recommended") {
+		t.Errorf("expected the recommended kernel to be installed; calls=%v", rec.calls)
+	}
+}
+
+// When a default kernel is already configured, setup must not re-download it.
+func TestEnsureKernelSkipsWhenPresent(t *testing.T) {
+	rec := &cmdRec{}
+	s := newCleanupSetup(t, rec, true)
+
+	kernelPath := s.defaultKernelPath()
+	if err := os.MkdirAll(filepath.Dir(kernelPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kernelPath, []byte("kernel"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.ensureKernel()
+
+	if rec.ran("kernel set") {
+		t.Errorf("a configured kernel must not be reinstalled; calls=%v", rec.calls)
+	}
+}
+
 // With OpenShell absent, cleanup skips the gateway/brew steps but still
 // removes the driver service.
 func TestCleanupWithoutOpenShell(t *testing.T) {
