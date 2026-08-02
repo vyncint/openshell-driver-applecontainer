@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Enabled GitHub Dependabot (alerts, security updates, weekly version updates for Go modules
+  and Actions) and the dependency graph.
+- Added CI security scanning: govulncheck, gosec (SAST), and gitleaks (secret scan over full
+  history), plus a CodeQL workflow that activates when the repo is public and a `make sec`
+  target mirroring CI. Documented in SECURITY.md.
+- Pinned all GitHub Actions to commit SHAs (kept current by Dependabot) and tightened workflow
+  token permissions to least privilege.
+- Hardened file permissions: seed material, the launchd plist, and driver-owned directories
+  are now owner-only (0600/0700); the socket directory is checked for symlink/ownership.
+- Bumped `golang.org/x/text` to v0.39.0 and `golang.org/x/net` to v0.56.0 (advisories
+  GO-2026-5970, GO-2026-5942; neither was reachable from our code).
+
 ## [0.2.1] - 2026-08-02
 
 ### Added

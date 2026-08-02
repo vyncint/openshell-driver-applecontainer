@@ -29,8 +29,8 @@ func TestExtractorCachesByDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o755 {
-		t.Errorf("supervisor perms = %o, want 755", info.Mode().Perm())
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("cached supervisor perms = %o, want 600 (read-only cache, never exec'd on host)", info.Mode().Perm())
 	}
 	firstRuns := len(fake.RunCalls())
 	if firstRuns == 0 {

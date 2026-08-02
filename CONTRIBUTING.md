@@ -22,9 +22,11 @@ make proto   # regenerate gRPC stubs from vendored protos (buf)
 ```
 
 `go vet`, `golangci-lint run`, and `go test -race ./...` must pass before every push — CI
-runs exactly these. Live end-to-end work additionally needs an Apple-silicon Mac with
-apple/container and OpenShell installed (`make prep`, `make e2e`, `make soak`); see
-docs/acceptance.md for what those flows are expected to prove.
+runs exactly these. `make sec` runs the same security scanners as CI (govulncheck, gosec,
+gitleaks); see [SECURITY.md](SECURITY.md) for the tooling and gosec-exclusion rationale. Live
+end-to-end work additionally needs an Apple-silicon Mac with apple/container and OpenShell
+installed (`make prep`, `make e2e`, `make soak`); see docs/acceptance.md for what those flows
+are expected to prove.
 
 ## Ground rules
 

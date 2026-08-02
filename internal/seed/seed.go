@@ -136,7 +136,9 @@ func (e *Extractor) Ensure(ctx context.Context, image string) (string, error) {
 	if err := validateELF(tmpFile); err != nil {
 		return "", err
 	}
-	if err := os.Chmod(tmpFile, 0o755); err != nil {
+	// The cached binary is only read (copied into per-sandbox seeds), never
+	// executed on the host, so it needs no exec bit.
+	if err := os.Chmod(tmpFile, 0o600); err != nil {
 		return "", fmt.Errorf("seed: chmod supervisor: %w", err)
 	}
 	if err := os.Rename(tmpFile, binPath); err != nil {
@@ -221,19 +223,24 @@ func Write(dir string, m Materials) error {
 			return fmt.Errorf("seed: create %s: %w", d, err)
 		}
 	}
-	if err := copyFile(m.SupervisorPath, filepath.Join(dir, "openshell-sandbox"), 0o755); err != nil {
+	// The supervisor copy only needs to be readable: boot.sh re-copies it
+	// and sets the exec bit inside the guest. All seed files live in the
+	// 0700 dir above, so their own group/other bits are unreachable, and
+	// every seed file is written owner-only (0600).
+	if err := copyFile(m.SupervisorPath, filepath.Join(dir, "openshell-sandbox")); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "boot.sh"), []byte(bootScript), 0o755); err != nil {
+	// boot.sh is the container entrypoint; it must be executable in the guest.
+	if err := os.WriteFile(filepath.Join(dir, "boot.sh"), []byte(bootScript), 0o700); err != nil { // #nosec G306 -- entrypoint script must be executable; parent seed dir is 0700
 		return fmt.Errorf("seed: write boot.sh: %w", err)
 	}
-	if err := copyFile(m.CAPath, filepath.Join(dir, "tls", "ca.crt"), 0o644); err != nil {
+	if err := copyFile(m.CAPath, filepath.Join(dir, "tls", "ca.crt")); err != nil {
 		return err
 	}
-	if err := copyFile(m.CertPath, filepath.Join(dir, "tls", "tls.crt"), 0o644); err != nil {
+	if err := copyFile(m.CertPath, filepath.Join(dir, "tls", "tls.crt")); err != nil {
 		return err
 	}
-	if err := copyFile(m.KeyPath, filepath.Join(dir, "tls", "tls.key"), 0o600); err != nil {
+	if err := copyFile(m.KeyPath, filepath.Join(dir, "tls", "tls.key")); err != nil {
 		return err
 	}
 	if m.Token != "" {
@@ -244,15 +251,17 @@ func Write(dir string, m Materials) error {
 	return nil
 }
 
-func copyFile(src, dst string, perm os.FileMode) error {
-	data, err := os.ReadFile(src)
+// copyFile copies src to dst owner-only (0600); seed files are never
+// executed on the host and the parent dir is already 0700.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src) // #nosec G304 -- src is an operator-configured or driver-cached path
 	if err != nil {
 		return fmt.Errorf("seed: read %s: %w", src, err)
 	}
-	if err := os.WriteFile(dst, data, perm); err != nil {
+	if err := os.WriteFile(dst, data, 0o600); err != nil {
 		return fmt.Errorf("seed: write %s: %w", dst, err)
 	}
-	if err := os.Chmod(dst, perm); err != nil {
+	if err := os.Chmod(dst, 0o600); err != nil {
 		return fmt.Errorf("seed: chmod %s: %w", dst, err)
 	}
 	return nil

@@ -186,9 +186,9 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 	// Seed dir contents on disk.
 	seedDir := filepath.Join(srv.store.SandboxDir(testSandboxID), "seed")
 	for f, wantPerm := range map[string]os.FileMode{
-		"openshell-sandbox": 0o755,
-		"boot.sh":           0o755,
-		"tls/ca.crt":        0o644,
+		"openshell-sandbox": 0o600, // boot.sh re-copies and sets +x in the guest
+		"boot.sh":           0o700, // entrypoint: executable
+		"tls/ca.crt":        0o600,
 		"tls/tls.key":       0o600,
 		"auth/sandbox.jwt":  0o600,
 	} {

@@ -9,6 +9,33 @@ security reports.
 Reports should include the affected version/commit, reproduction steps, and impact. You can
 expect an acknowledgement within a week.
 
+## Automated security tooling
+
+Every push and pull request runs (`.github/workflows/ci.yml`):
+
+- **govulncheck** — known-vulnerability scan of the dependency tree and Go stdlib, limited to
+  symbols reachable from our code.
+- **gosec** — static analysis. All crypto/TLS/injection/permission rules are active. Four rule
+  classes are excluded as reviewed false-positives for a CLI-wrapping daemon (documented inline
+  in the workflow): `G204` (subprocess — the driver execs the `container` CLI with constant
+  commands and argv arrays, never a shell), `G304`/`G703` (file-by-path / taint — operator
+  config paths, and sandbox-derived path components validated by `state.ValidID`), and `G101`
+  (noisy on env-var-*name* constants; secret detection is owned by gitleaks / secret scanning).
+- **gitleaks** — secret scan over the full commit history.
+
+Repository configuration:
+
+- **Dependabot** — alerts, security updates, and weekly version updates for Go modules and
+  GitHub Actions (`.github/dependabot.yml`); the dependency graph is enabled.
+- **CodeQL** (`.github/workflows/codeql.yml`) — dormant while the repo is private (it needs
+  GitHub Advanced Security), activates automatically when the repo is public.
+- **GitHub secret scanning + push protection** — activate when the repo is public; until then
+  the gitleaks CI job covers secret detection.
+- GitHub Actions are pinned to commit SHAs and kept current by Dependabot; workflow tokens use
+  least-privilege permissions.
+
+Run the same scans locally with `make sec` (see CONTRIBUTING.md).
+
 ## Scope notes
 
 - The driver is a local, single-user component: its gRPC socket is owner-only (0600 in a

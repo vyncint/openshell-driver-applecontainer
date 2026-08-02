@@ -274,15 +274,15 @@ func (s *Setup) fixCLIRegistrations() {
 
 func (s *Setup) installAgent(tlsDir, socket string) error {
 	logPath := s.agentLogPath()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o700); err != nil {
 		return err
 	}
 	plistPath := s.agentPlistPath()
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o700); err != nil {
 		return err
 	}
 	plist := RenderLaunchAgent(s.BinPath, tlsDir, logPath)
-	if err := os.WriteFile(plistPath, []byte(plist), 0o644); err != nil {
+	if err := os.WriteFile(plistPath, []byte(plist), 0o600); err != nil {
 		return err
 	}
 	target := fmt.Sprintf("gui/%d/%s", s.UID, AgentLabel)
@@ -354,7 +354,7 @@ func (s *Setup) pullImages(ctx context.Context, opts Options) {
 }
 
 func upsertFileBlock(path string, lines []string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	existing := ""
