@@ -5,7 +5,58 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/types/known/structpb"
+
+	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 )
+
+func TestCheckDriverConfigPolicyMounts(t *testing.T) {
+	volume := driverConfig{Mounts: []mountConfig{{Type: "volume", Source: "/Users/me/data", Target: "/data"}}}
+	tmpfs := driverConfig{Mounts: []mountConfig{{Type: "tmpfs", Target: "/scratch"}}}
+
+	// Default (mounts off): volume rejected, tmpfs allowed.
+	base := config.Config{Network: "oshl"}
+	if err := checkDriverConfigPolicy(base, volume); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Errorf("volume mount should be disabled by default, got %v", err)
+	}
+	if err := checkDriverConfigPolicy(base, tmpfs); err != nil {
+		t.Errorf("tmpfs must always be allowed, got %v", err)
+	}
+
+	// Opt-in, no root: allowed anywhere.
+	allow := config.Config{Network: "oshl", AllowHostMounts: true}
+	if err := checkDriverConfigPolicy(allow, volume); err != nil {
+		t.Errorf("volume mount should be allowed with --allow-host-mounts, got %v", err)
+	}
+
+	// Opt-in with a root: only sources under the root.
+	rooted := config.Config{Network: "oshl", AllowHostMounts: true, HostMountRoot: "/Users/me"}
+	if err := checkDriverConfigPolicy(rooted, volume); err != nil {
+		t.Errorf("source under root should be allowed, got %v", err)
+	}
+	outside := driverConfig{Mounts: []mountConfig{{Type: "volume", Source: "/etc", Target: "/data"}}}
+	if err := checkDriverConfigPolicy(rooted, outside); err == nil || !strings.Contains(err.Error(), "outside the permitted root") {
+		t.Errorf("source outside root should be rejected, got %v", err)
+	}
+	// A sibling that only shares a prefix string is not "within".
+	sibling := driverConfig{Mounts: []mountConfig{{Type: "volume", Source: "/Users/mensa", Target: "/data"}}}
+	if err := checkDriverConfigPolicy(rooted, sibling); err == nil {
+		t.Errorf("prefix-only sibling must be rejected")
+	}
+}
+
+func TestCheckDriverConfigPolicyNetwork(t *testing.T) {
+	cfg := config.Config{Network: "oshl", AllowedNetworks: []string{"lab"}}
+
+	for _, ok := range []string{"", "oshl", "lab"} {
+		if err := checkDriverConfigPolicy(cfg, driverConfig{Network: ok}); err != nil {
+			t.Errorf("network %q should be allowed, got %v", ok, err)
+		}
+	}
+	err := checkDriverConfigPolicy(cfg, driverConfig{Network: "prod"})
+	if err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Errorf("unlisted network should be rejected, got %v", err)
+	}
+}
 
 func mustStruct(t *testing.T, m map[string]any) *structpb.Struct {
 	t.Helper()

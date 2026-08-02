@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/seed"
 )
 
@@ -109,6 +111,49 @@ func (c driverConfig) validate() error {
 		return fmt.Errorf("driver config: kernel must be an absolute host path")
 	}
 	return nil
+}
+
+// checkDriverConfigPolicy enforces the operator's mount and network
+// allowlist policy on a structurally-valid driver config. It is separate
+// from validate() because the policy depends on driver configuration, not
+// just the request.
+func checkDriverConfigPolicy(cfg config.Config, dcfg driverConfig) error {
+	for i, m := range dcfg.Mounts {
+		if m.Type != "volume" {
+			continue // tmpfs never touches the host filesystem
+		}
+		if !cfg.AllowHostMounts {
+			return fmt.Errorf("driver config: mounts[%d]: host volume mounts are disabled; start the driver with --allow-host-mounts to permit them", i)
+		}
+		if cfg.HostMountRoot != "" && !pathWithin(cfg.HostMountRoot, m.Source) {
+			return fmt.Errorf("driver config: mounts[%d]: volume source %q is outside the permitted root %s", i, m.Source, cfg.HostMountRoot)
+		}
+	}
+	if dcfg.Network != "" && !networkAllowed(cfg, dcfg.Network) {
+		return fmt.Errorf("driver config: network %q is not permitted (allowed: %s)", dcfg.Network, strings.Join(allowedNetworks(cfg), ", "))
+	}
+	return nil
+}
+
+func allowedNetworks(cfg config.Config) []string {
+	return append([]string{cfg.Network}, cfg.AllowedNetworks...)
+}
+
+func networkAllowed(cfg config.Config, name string) bool {
+	for _, n := range allowedNetworks(cfg) {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// pathWithin reports whether p is root itself or lies under it, after
+// normalizing both.
+func pathWithin(root, p string) bool {
+	root = filepath.Clean(root)
+	p = filepath.Clean(p)
+	return p == root || strings.HasPrefix(p, root+string(filepath.Separator))
 }
 
 // validateMountTarget enforces the reserved-target policy on one container

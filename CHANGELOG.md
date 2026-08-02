@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- **Host volume mounts are now opt-in.** Per-sandbox `--driver-config-json` `volume` mounts are
+  rejected unless the driver is started with `--allow-host-mounts`, and `--host-mount-root`
+  constrains permitted source directories. `tmpfs` mounts are unaffected. (#11)
+- **The per-sandbox network override is allowlisted** to `--network` plus `--allowed-networks`;
+  a sandbox spec can no longer attach a VM to an arbitrary vmnet network. (#12)
 - Enabled GitHub Dependabot (alerts, security updates, weekly version updates for Go modules
   and Actions) and the dependency graph.
 - Added CI security scanning: govulncheck, gosec (SAST), and gitleaks (secret scan over full
@@ -19,6 +24,13 @@ All notable changes to this project are documented here. The format follows
   are now owner-only (0600/0700); the socket directory is checked for symlink/ownership.
 - Bumped `golang.org/x/text` to v0.39.0 and `golang.org/x/net` to v0.56.0 (advisories
   GO-2026-5970, GO-2026-5942; neither was reachable from our code).
+
+### Fixed
+
+- `setup` reliably restarts the driver service right after a binary upgrade: it waits for
+  launchd to fully unload the old instance before bootstrapping (fixing a transient
+  `Bootstrap failed: 5` seen mid-drain), retries the bootstrap, and forces a `kickstart` if the
+  service does not come up — failing loudly instead of leaving it silently down. (#14)
 
 ## [0.2.1] - 2026-08-02
 

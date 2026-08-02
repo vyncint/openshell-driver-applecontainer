@@ -30,6 +30,44 @@ func TestDefaults(t *testing.T) {
 	if cfg.Kernel != "" {
 		t.Errorf("kernel default = %q, want empty (runtime default kernel)", cfg.Kernel)
 	}
+	if cfg.AllowHostMounts {
+		t.Error("host mounts must be off by default")
+	}
+	if cfg.HostMountRoot != "" || len(cfg.AllowedNetworks) != 0 {
+		t.Errorf("mount root / allowed networks should default empty: %q %v", cfg.HostMountRoot, cfg.AllowedNetworks)
+	}
+}
+
+func TestSecurityFlags(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--allow-host-mounts",
+		"--host-mount-root", "/srv/mounts",
+		"--allowed-networks", "lab, prod ,,",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AllowHostMounts {
+		t.Error("--allow-host-mounts not parsed")
+	}
+	if cfg.HostMountRoot != "/srv/mounts" {
+		t.Errorf("host mount root = %q", cfg.HostMountRoot)
+	}
+	if len(cfg.AllowedNetworks) != 2 || cfg.AllowedNetworks[0] != "lab" || cfg.AllowedNetworks[1] != "prod" {
+		t.Errorf("allowed networks = %v (blanks should be dropped)", cfg.AllowedNetworks)
+	}
+
+	// Env fallback for the bool.
+	t.Setenv("OSHL_AC_ALLOW_HOST_MOUNTS", "true")
+	cfg, err = Parse(nil)
+	if err != nil || !cfg.AllowHostMounts {
+		t.Errorf("env bool not honored: %v %v", cfg.AllowHostMounts, err)
+	}
+
+	// A relative mount root is rejected.
+	if _, err := Parse([]string{"--host-mount-root", "relative/path"}); err == nil {
+		t.Error("relative --host-mount-root should be rejected")
+	}
 }
 
 func TestKernelFlagAndEnv(t *testing.T) {
