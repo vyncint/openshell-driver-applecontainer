@@ -11,18 +11,18 @@ own micro-VM with a dedicated Linux kernel on Apple silicon. Measured here: **me
 
 ## Get started
 
-You need: an Apple-silicon Mac (macOS 26+), [apple/container](https://github.com/apple/container)
-1.2+, and [OpenShell](https://github.com/NVIDIA/OpenShell) installed
-(`curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh`).
-
-Then it is one install and one command:
+One line — it checks prerequisites (Apple silicon macOS, Homebrew, apple/container, OpenShell),
+offers to install anything missing, then downloads the driver (verifying its checksum) and runs
+`setup`:
 
 ```sh
-make install                              # or drop the release binary into /opt/homebrew/bin
-openshell-driver-applecontainer setup
+curl -LsSf https://raw.githubusercontent.com/vyncint/openshell-driver-applecontainer/main/install.sh | sh
 ```
 
-That's it. Use OpenShell normally:
+> This URL and the release downloads it fetches work once the repository is public. While it is
+> private, use the manual path below.
+
+Then use OpenShell normally:
 
 ```sh
 openshell sandbox create --name demo
@@ -34,6 +34,20 @@ Both services start at login and restart on failure — nothing to launch by han
 `setup` is **idempotent**: re-run it any time (after an upgrade, after changing flags, or just
 to repair the installation). `openshell-driver-applecontainer uninstall` removes everything
 setup installed.
+
+The installer is non-interactive with `-y`, and takes `--no-setup`, `--version vX.Y.Z`, and
+`--prefix <dir>` (or the `OSHL_AC_YES`, `OSHL_AC_VERSION`, `OSHL_AC_PREFIX` env vars).
+
+### Manual install
+
+Prerequisites: an Apple-silicon Mac (macOS 26+), [apple/container](https://github.com/apple/container)
+1.2+, and [OpenShell](https://github.com/NVIDIA/OpenShell)
+(`curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh`). Then:
+
+```sh
+make install                              # or drop the release binary into /opt/homebrew/bin
+openshell-driver-applecontainer setup
+```
 
 ### What `setup` does
 
@@ -226,18 +240,25 @@ recon in `docs/CONTRACT.md`.
 |---|---|---|---|
 | v0.1.x – v0.2.x | v0.0.96 (`5541398ccbda`) | 1.2.0 | Apple silicon, macOS 26 |
 
-## Install from a release (pre-Homebrew)
+## Install from a release (manual)
 
-Download the `darwin_arm64` archive from a release, unpack into `/opt/homebrew/bin`, and clear
-the quarantine bit (unsigned binary), then run `setup`:
+The one-line installer above does this for you. To do it by hand: download the `darwin_arm64`
+archive from a [release](https://github.com/vyncint/openshell-driver-applecontainer/releases),
+verify its checksum against `checksums.txt`, unpack into `/opt/homebrew/bin`, clear the
+quarantine bit (unsigned binary), then run `setup`:
 
 ```sh
-xattr -d com.apple.quarantine openshell-driver-applecontainer
+shasum -a 256 -c checksums.txt --ignore-missing
+tar -xzf openshell-driver-applecontainer_*_darwin_arm64.tar.gz
+install -m 0755 openshell-driver-applecontainer /opt/homebrew/bin/
+xattr -d com.apple.quarantine /opt/homebrew/bin/openshell-driver-applecontainer
 openshell-driver-applecontainer setup
 ```
 
 <!-- TODO when public: enable the Homebrew tap section in .goreleaser.yaml and document
      `brew install` here (a private tap is useless). -->
+<!-- Future: sign releases (cosign) so the installer can verify authenticity, not just
+     integrity. -->
 
 ## Contributing
 

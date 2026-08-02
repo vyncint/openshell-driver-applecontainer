@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- One-line installer (`curl -LsSf …/install.sh | sh`): checks prerequisites (Apple silicon
+  macOS, Homebrew, apple/container, OpenShell) and offers to install any that are missing, then
+  downloads the driver release, verifies its checksum, and runs `setup`. Non-interactive with
+  `-y`; supports `--no-setup`, `--version`, `--prefix`. Activates when the repo is public.
+- CI `shellcheck` job lints the installer, e2e scripts, and git hooks.
+
 ### Security
 
 - **Host volume mounts are now opt-in.** Per-sandbox `--driver-config-json` `volume` mounts are
