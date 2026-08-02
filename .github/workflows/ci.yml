@@ -64,11 +64,13 @@ jobs:
         with:
           fetch-depth: 0
       # CI mirror of .githooks/commit-msg: scan every commit message in
-      # the repository for forbidden attribution patterns.
+      # the repository for AI attribution. Plain Co-authored-by trailers are
+      # allowed (GitHub adds them on squash-merge and for Dependabot); an AI
+      # co-author is still caught by the name patterns.
       - name: audit commit messages
         run: |
           set -eu
-          pattern='claude|anthropic|co-authored-by|generated with|ai-assisted'
+          pattern='claude|anthropic|generated with|ai-assisted'
           matches=$(git log --format='%H %s %b' | grep -icE "$pattern" || true)
           if [ "$matches" -ne 0 ]; then
             echo "commit-audit: forbidden attribution pattern found in commit messages:" >&2

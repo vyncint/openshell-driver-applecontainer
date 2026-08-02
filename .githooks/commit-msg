@@ -1,6 +1,9 @@
 #!/bin/sh
-# Reject any AI attribution in commit messages.
-if grep -qiE 'claude|anthropic|co-authored-by|generated with|ai-assisted' "$1"; then
+# Reject AI attribution in commit messages (Claude/Anthropic/"generated with"/
+# "ai-assisted"). Plain Co-authored-by trailers are allowed: GitHub adds them on
+# squash-merge and for Dependabot, and an AI co-author is still caught by the
+# name patterns above.
+if grep -qiE 'claude|anthropic|generated with|ai-assisted' "$1"; then
   echo "commit-msg hook: forbidden attribution pattern found. Rewrite the message." >&2
   exit 1
 fi
