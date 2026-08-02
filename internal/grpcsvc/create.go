@@ -23,6 +23,10 @@ import (
 // containerNamePrefix namespaces every VM this driver manages.
 const containerNamePrefix = "oshl-"
 
+// deleteTimeout bounds a delete's detached teardown so a wedged
+// provisioning task cannot block it indefinitely.
+const deleteTimeout = 30 * time.Second
+
 // Labels applied to every managed container; reconcile identifies ours by
 // the managed-by marker.
 const (
@@ -345,6 +349,13 @@ func refWithDigest(ref, digest string) string {
 func (s *Server) DeleteSandbox(ctx context.Context, req *computev1.DeleteSandboxRequest) (*computev1.DeleteSandboxResponse, error) {
 	s.log.Info("delete sandbox requested", "sandbox_id", req.GetSandboxId(), "name", req.GetSandboxName())
 
+	// Teardown, once begun, runs under a detached context: a canceled or
+	// short-deadline delete RPC must not leave the sandbox half-removed —
+	// that leftover is skipped by the poller and re-adopted on restart, so
+	// the delete would be silently lost.
+	teardownCtx, tcancel := context.WithTimeout(context.WithoutCancel(ctx), deleteTimeout)
+	defer tcancel()
+
 	s.mu.Lock()
 	e, ok := s.lookupLocked(req.GetSandboxId(), req.GetSandboxName())
 	if !ok {
@@ -353,7 +364,7 @@ func (s *Server) DeleteSandbox(ctx context.Context, req *computev1.DeleteSandbox
 		// name so an orphaned VM cannot survive a lost record.
 		deleted := false
 		if state.ValidID(req.GetSandboxId()) {
-			if err := s.rt.Delete(ctx, containerName(req.GetSandboxId())); err == nil {
+			if err := s.rt.Delete(teardownCtx, containerName(req.GetSandboxId())); err == nil {
 				deleted = true
 			} else if !errors.Is(err, backend.ErrNotFound) {
 				return nil, status.Errorf(codes.Internal, "delete container: %v", err)
@@ -374,16 +385,17 @@ func (s *Server) DeleteSandbox(ctx context.Context, req *computev1.DeleteSandbox
 	if cancel != nil {
 		cancel()
 	}
+	// Wait for provisioning to stop, bounded by the detached timeout rather
+	// than the request context, then tear down regardless.
 	if done != nil {
 		select {
 		case <-done:
-		case <-ctx.Done():
-			return nil, status.Error(codes.Canceled, "delete canceled while waiting for provisioning to stop")
+		case <-teardownCtx.Done():
 		}
 	}
 
 	deleted := true
-	if err := s.rt.Delete(ctx, name); err != nil {
+	if err := s.rt.Delete(teardownCtx, name); err != nil {
 		if errors.Is(err, backend.ErrNotFound) {
 			deleted = false
 		} else {

@@ -21,6 +21,23 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
+func TestListenUnixRejectsSymlinkedDir(t *testing.T) {
+	base := shortTempDir(t)
+	realDir := filepath.Join(base, "real")
+	if err := os.Mkdir(realDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	// Socket dir would be the symlink itself: must be refused.
+	_, err := listenUnix(filepath.Join(link, "driver.sock"))
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("want symlink rejection, got %v", err)
+	}
+}
+
 func TestListenUnixPermissions(t *testing.T) {
 	dir := filepath.Join(shortTempDir(t), "sockdir")
 	path := filepath.Join(dir, "driver.sock")

@@ -156,11 +156,16 @@ func run(args []string) error {
 
 // listenUnix binds the driver socket with owner-only permissions: parent
 // directory 0700, socket 0600. A live socket (another driver instance)
-// aborts startup; a stale file is removed.
+// aborts startup; a stale file is removed. The default socket lives under a
+// world-writable /tmp, so the directory is verified to be a real directory
+// owned by us and not a symlink before we trust it.
 func listenUnix(path string) (net.Listener, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
+	}
+	if err := verifyOwnedDir(dir); err != nil {
+		return nil, err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("restrict socket dir: %w", err)
@@ -186,6 +191,26 @@ func listenUnix(path string) (net.Listener, error) {
 		return nil, fmt.Errorf("restrict socket: %w", err)
 	}
 	return lis, nil
+}
+
+// verifyOwnedDir rejects a socket directory that is a symlink or is not a
+// directory owned by the current user — the shared-/tmp attack surface
+// where another local user could pre-plant it to redirect or DoS the driver.
+func verifyOwnedDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("stat socket dir: %w", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("socket dir %s is a symlink; refusing to use it", dir)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("socket dir %s is not a directory", dir)
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Getuid() {
+		return fmt.Errorf("socket dir %s is owned by uid %d, not the current user %d; refusing to use it", dir, st.Uid, os.Getuid())
+	}
+	return nil
 }
 
 func newLogger(level string) *slog.Logger {

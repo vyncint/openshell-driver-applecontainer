@@ -206,9 +206,12 @@ func (s *Setup) ensureNetwork(ctx context.Context, name string) (string, error) 
 	if err := s.RT.NetworkCreate(ctx, name); err != nil {
 		return "", fmt.Errorf("create vmnet network %s: %w", name, err)
 	}
-	ip, err = find()
-	if err != nil || ip == "" {
-		return "", fmt.Errorf("vmnet network %s has no gateway address after creation (%v)", name, err)
+	// The gateway address may not be assigned the instant create returns on
+	// a fresh machine; poll briefly for it.
+	var findErr error
+	waitFor(func() bool { ip, findErr = find(); return findErr == nil && ip != "" }, 10*time.Second)
+	if findErr != nil || ip == "" {
+		return "", fmt.Errorf("vmnet network %s has no gateway address after creation (%v)", name, findErr)
 	}
 	return ip, nil
 }

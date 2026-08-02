@@ -374,6 +374,12 @@ func TestValidateRejectsBadDriverConfigAndResources(t *testing.T) {
 	if _, err := client.ValidateSandboxCreate(ctx, &computev1.ValidateSandboxCreateRequest{Sandbox: badRes.Sandbox}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("bad cpu quantity: want InvalidArgument, got %v", err)
 	}
+
+	badImage := createRequest()
+	badImage.Sandbox.Spec.Template.Image = "--privileged"
+	if _, err := client.ValidateSandboxCreate(ctx, &computev1.ValidateSandboxCreateRequest{Sandbox: badImage.Sandbox}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("flag-like image ref: want InvalidArgument, got %v", err)
+	}
 }
 
 func TestRefWithDigest(t *testing.T) {
@@ -455,6 +461,39 @@ func TestDeleteSandbox(t *testing.T) {
 	}
 	if _, err := client.GetSandbox(context.Background(), &computev1.GetSandboxRequest{SandboxId: testSandboxID}); status.Code(err) != codes.NotFound {
 		t.Errorf("want NotFound after delete, got %v", err)
+	}
+}
+
+func TestDeleteCompletesUnderCanceledContext(t *testing.T) {
+	fake := &backend.Fake{}
+	srv := newLiveServer(t, fake)
+	client := dialTestServer(t, srv)
+
+	if _, err := client.CreateSandbox(context.Background(), createRequest()); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, srv, reasonBackendReady)
+
+	// A canceled request context must not abort teardown: once committed to
+	// deleting, the VM and record must still be removed (otherwise a
+	// restart would re-adopt the "deleted" sandbox). Call the handler
+	// directly so the context is genuinely canceled at entry.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := srv.DeleteSandbox(ctx, &computev1.DeleteSandboxRequest{SandboxId: testSandboxID}); err != nil {
+		t.Fatalf("delete under canceled ctx returned error: %v", err)
+	}
+	if _, err := fake.Get(context.Background(), "oshl-"+testSandboxID); err == nil {
+		t.Error("VM survived a canceled delete")
+	}
+	if _, err := srv.store.Load(testSandboxID); err == nil {
+		t.Error("record survived a canceled delete")
+	}
+	srv.mu.Lock()
+	_, stuck := srv.sandboxes[testSandboxID]
+	srv.mu.Unlock()
+	if stuck {
+		t.Error("registry entry left in deleting state after a canceled delete")
 	}
 }
 

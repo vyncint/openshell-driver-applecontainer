@@ -46,15 +46,15 @@ func TestRenderLaunchAgentEscapesXML(t *testing.T) {
 func TestUpsertManagedBlock(t *testing.T) {
 	lines := GatewayEnvLines("/tmp/oshl-ac/driver.sock", "/tls")
 
-	// Fresh file.
+	// Fresh file. Path values are single-quoted (the file is shell-sourced).
 	fresh := UpsertManagedBlock("", lines)
 	for _, want := range []string{
 		blockBegin, blockEnd,
 		"OPENSHELL_DRIVERS=applecontainer",
-		"OPENSHELL_COMPUTE_DRIVER_SOCKET=/tmp/oshl-ac/driver.sock",
+		"OPENSHELL_COMPUTE_DRIVER_SOCKET='/tmp/oshl-ac/driver.sock'",
 		"OPENSHELL_BIND_ADDRESS=0.0.0.0",
 		"OPENSHELL_ENABLE_MTLS_AUTH=true",
-		"OPENSHELL_LOCAL_TLS_DIR=/tls",
+		"OPENSHELL_LOCAL_TLS_DIR='/tls'",
 	} {
 		if !strings.Contains(fresh, want) {
 			t.Errorf("managed block missing %q", want)
@@ -77,6 +77,54 @@ func TestUpsertManagedBlock(t *testing.T) {
 	}
 	if !strings.Contains(updated, "/other.sock") || strings.Contains(updated, "/tmp/oshl-ac/driver.sock") {
 		t.Error("managed block not replaced")
+	}
+}
+
+func TestGatewayEnvShellQuoting(t *testing.T) {
+	// A path with a space and a single quote must survive a shell source.
+	lines := GatewayEnvLines("/tmp/oshl ac/it's.sock", "/tls dir")
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, `OPENSHELL_COMPUTE_DRIVER_SOCKET='/tmp/oshl ac/it'\''s.sock'`) {
+		t.Errorf("socket not shell-quoted: %q", joined)
+	}
+	if !strings.Contains(joined, "OPENSHELL_LOCAL_TLS_DIR='/tls dir'") {
+		t.Errorf("tls dir not shell-quoted: %q", joined)
+	}
+}
+
+func TestRemoveManagedBlockDegenerate(t *testing.T) {
+	lines := GatewayEnvLines("/s", "/t")
+	one := UpsertManagedBlock("", lines)
+
+	// Two managed blocks (external tampering): both removed.
+	two := "KEEP=1\n" + one + one
+	if got := RemoveManagedBlock(two); strings.Contains(got, blockBegin) {
+		t.Errorf("duplicate blocks not fully removed: %q", got)
+	} else if !strings.Contains(got, "KEEP=1") {
+		t.Errorf("user content lost: %q", got)
+	}
+
+	// CRLF line endings: no stray carriage return left behind.
+	crlf := "A=1\r\n" + blockBegin + "\r\n" + "X=1\r\n" + blockEnd + "\r\nB=2\r\n"
+	got := RemoveManagedBlock(crlf)
+	if strings.Contains(got, blockBegin) || strings.Contains(got, "X=1") {
+		t.Errorf("CRLF block not removed: %q", got)
+	}
+	if strings.Contains(got, "\r\r") {
+		t.Errorf("stray carriage return: %q", got)
+	}
+
+	// Damaged block (begin without end): dropped from begin onward.
+	damaged := "A=1\n" + blockBegin + "\nX=1\n"
+	if got := RemoveManagedBlock(damaged); strings.Contains(got, blockBegin) || strings.Contains(got, "X=1") {
+		t.Errorf("damaged block not removed: %q", got)
+	} else if !strings.Contains(got, "A=1") {
+		t.Errorf("content before damaged block lost: %q", got)
+	}
+
+	// Upsert over a duplicated-block file converges to exactly one block.
+	if got := UpsertManagedBlock(two, lines); strings.Count(got, blockBegin) != 1 {
+		t.Errorf("upsert did not converge to one block: %d", strings.Count(got, blockBegin))
 	}
 }
 

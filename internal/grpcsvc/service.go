@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc/codes"
@@ -71,6 +72,8 @@ func New(cfg config.Config, rt backend.Runtime, store *state.Store, log *slog.Lo
 			RT:       rt,
 			CacheDir: filepath.Join(cfg.StateDir, "cache", "supervisor"),
 			Log:      log,
+			// So a leaked extraction container is reclaimed as an orphan.
+			Labels: map[string]string{labelManagedBy: managedByValue},
 		},
 		bgCtx:     bgCtx,
 		bgCancel:  bgCancel,
@@ -106,6 +109,12 @@ func (s *Server) validateSandbox(sb *computev1.DriverSandbox) error {
 	}
 	if _, err := parseDriverConfig(sb.GetSpec().GetTemplate().GetDriverConfig()); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// A leading dash would be read as a flag when the ref becomes a
+	// positional argument to `container run`/`pull`. Defense in depth: the
+	// pull-first flow already rejects such a ref, but fail fast and clearly.
+	if img := sb.GetSpec().GetTemplate().GetImage(); strings.HasPrefix(img, "-") {
+		return status.Errorf(codes.InvalidArgument, "invalid image reference %q", img)
 	}
 	res := sb.GetSpec().GetTemplate().GetResources()
 	for _, q := range []string{res.GetCpuRequest(), res.GetCpuLimit()} {

@@ -17,6 +17,8 @@ func TestPreflightRejectsLoopbackEndpoint(t *testing.T) {
 		"https://localhost:17670",
 		"https://[::1]:17670",
 		"http://127.0.0.9:17670", // whole 127/8 block is loopback
+		"https://0.0.0.0:17670",  // unspecified: a bind address, not a destination
+		"https://[::]:17670",
 	} {
 		t.Run(ep, func(t *testing.T) {
 			cfg := testConfig()
