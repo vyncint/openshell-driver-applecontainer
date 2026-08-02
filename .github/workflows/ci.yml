@@ -49,6 +49,14 @@ jobs:
       - run: GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./...
       - run: go vet ./...
 
+  # Lint the shell scripts (installer, e2e, hooks). The installer runs on
+  # users' machines via `curl | sh`, so it is held to the same bar.
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: shellcheck install.sh e2e/*.sh .githooks/commit-msg .githooks/prepare-commit-msg
+
   commit-audit:
     runs-on: ubuntu-latest
     steps:
