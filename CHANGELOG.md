@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--network-policy-file`: an operator-only flag that replaces the sandbox image's baked-in
+  `/etc/openshell/policy.yaml` network policy for every sandbox, installed as root during boot
+  before the supervisor starts. Lets an operator allowlist additional egress a tool's
+  self-updater needs (e.g. `downloads.claude.ai` for `claude update`) without weakening the
+  default policy for anything not explicitly added. Driver-wide and operator-only — never
+  settable per sandbox. Verified live: `claude update` succeeds with an overlay adding the one
+  missing host, while unrelated hosts remain blocked.
+
 ### Changed
 
 - Replaced the ASCII architecture diagrams with Mermaid (topology, create flow, lifecycle, and

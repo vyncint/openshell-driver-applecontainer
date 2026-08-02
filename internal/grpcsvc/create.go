@@ -195,14 +195,21 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		return err
 	}
 
+	if s.cfg.NetworkPolicyFile != "" {
+		if _, err := os.Stat(s.cfg.NetworkPolicyFile); err != nil {
+			return fmt.Errorf("network policy file %q is not usable: %w", s.cfg.NetworkPolicyFile, err)
+		}
+	}
+
 	// Per-sandbox seed directory.
 	seedDir := filepath.Join(s.store.SandboxDir(rec.ID), "seed")
 	if err := seed.Write(seedDir, seed.Materials{
-		SupervisorPath: supPath,
-		CAPath:         s.cfg.GuestTLSCA,
-		CertPath:       s.cfg.GuestTLSCert,
-		KeyPath:        s.cfg.GuestTLSKey,
-		Token:          token,
+		SupervisorPath:    supPath,
+		CAPath:            s.cfg.GuestTLSCA,
+		CertPath:          s.cfg.GuestTLSCert,
+		KeyPath:           s.cfg.GuestTLSKey,
+		Token:             token,
+		PolicyOverlayPath: s.cfg.NetworkPolicyFile,
 	}); err != nil {
 		return err
 	}

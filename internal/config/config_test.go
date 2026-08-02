@@ -43,6 +43,7 @@ func TestSecurityFlags(t *testing.T) {
 		"--allow-host-mounts",
 		"--host-mount-root", "/srv/mounts",
 		"--allowed-networks", "lab, prod ,,",
+		"--network-policy-file", "/etc/oshl-ac/policy.yaml",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,9 @@ func TestSecurityFlags(t *testing.T) {
 	if len(cfg.AllowedNetworks) != 2 || cfg.AllowedNetworks[0] != "lab" || cfg.AllowedNetworks[1] != "prod" {
 		t.Errorf("allowed networks = %v (blanks should be dropped)", cfg.AllowedNetworks)
 	}
+	if cfg.NetworkPolicyFile != "/etc/oshl-ac/policy.yaml" {
+		t.Errorf("network policy file = %q", cfg.NetworkPolicyFile)
+	}
 
 	// Env fallback for the bool.
 	t.Setenv("OSHL_AC_ALLOW_HOST_MOUNTS", "true")
@@ -67,6 +71,16 @@ func TestSecurityFlags(t *testing.T) {
 	// A relative mount root is rejected.
 	if _, err := Parse([]string{"--host-mount-root", "relative/path"}); err == nil {
 		t.Error("relative --host-mount-root should be rejected")
+	}
+
+	// A relative policy file is rejected.
+	if _, err := Parse([]string{"--network-policy-file", "relative/policy.yaml"}); err == nil {
+		t.Error("relative --network-policy-file should be rejected")
+	}
+
+	// Unset by default.
+	if def, _ := Parse(nil); def.NetworkPolicyFile != "" {
+		t.Errorf("network policy file default = %q, want empty", def.NetworkPolicyFile)
 	}
 }
 

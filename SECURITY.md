@@ -62,3 +62,20 @@ two host-facing knobs a spec can set are gated by operator policy:
 Even with these gates, treat the ability to submit sandbox specs as privileged in the
 intended single-user, single-tenant deployment. Enabling `--allow-host-mounts` without a
 `--host-mount-root` grants spec authors read/write to any of the invoking user's files.
+
+## Network policy overlay (`--network-policy-file`)
+
+Each sandbox image ships a default network policy (`/etc/openshell/policy.yaml`) that the
+in-guest supervisor enforces — a per-(binary, destination) allowlist, not a simple domain
+block. `--network-policy-file` lets the operator replace that file for every sandbox this
+driver instance boots, by installing it as root during boot, before the supervisor starts
+(the only point at which the file is writable — the shipped policy marks `/etc` read-only for
+the running workload).
+
+This control is **driver-wide and operator-only**: it is not exposed through
+`--driver-config-json`, and there is no per-sandbox equivalent, because it changes the guest's
+own security policy, not just this driver's behavior. Whoever can set the driver's flags
+controls what every sandbox on this host can reach — same trust boundary as
+`--allow-host-mounts`. A permissive overlay weakens every sandbox uniformly; scope it to the
+specific hosts you need (start from the image's own policy and add entries — see the README's
+[Network policy overrides](README.md#network-policy-overrides)), not to a blanket allow-all.

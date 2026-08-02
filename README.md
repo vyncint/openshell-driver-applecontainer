@@ -159,6 +159,7 @@ changing anything here so the launchd service picks it up:
 | `--allow-host-mounts` | `false` | permit per-sandbox `volume` mounts of host directories (see security note below) |
 | `--host-mount-root` | (unset) | when set, `volume` mount sources must live under this directory |
 | `--allowed-networks` | (only `--network`) | comma-separated extra vmnet networks a sandbox may select via driver config |
+| `--network-policy-file` | (unset — image default policy) | host path to a `policy.yaml` that replaces the sandbox's network policy for every sandbox (see [Network policy overrides](#network-policy-overrides)) |
 | `--log-level` | `info` | driver log level and sandbox default |
 
 `setup` accepts `--network`, `--socket`, `--tls-dir`, `--default-image`, `--supervisor-image`,
@@ -196,6 +197,38 @@ Resource requests (`openshell sandbox create --cpu 3 --memory 3Gi`) map to **rea
 (`--cpus` / `--memory`), unlike the upstream VM driver, which accepts but ignores them.
 Limits win over requests; Kubernetes quantity strings are accepted; apple/container adds one
 `cpuOverhead` vCPU on top of the request.
+
+## Network policy overrides
+
+Every sandbox image ships a default network policy at `/etc/openshell/policy.yaml` — a
+per-binary, per-destination allowlist (not a simple domain block) that the in-guest supervisor
+enforces on every outbound connection. It's deliberately tight: for example, the default
+`claude_code` policy lets the `claude` binary reach `api.anthropic.com` but **not**
+`downloads.claude.ai`, so `claude update` fails inside a sandbox with a `403` from the policy
+proxy — that's the sandbox working as designed, not a bug.
+
+If you need a sandbox to reach additional hosts (a tool's self-updater, an internal registry,
+etc.), start `openshell-driver-applecontainer` with:
+
+```sh
+--network-policy-file /path/to/policy.yaml
+```
+
+The driver installs that file over `/etc/openshell/policy.yaml` at boot — as root, before the
+supervisor starts, which is the only point at which that file is writable (the shipped policy
+marks `/etc` read-only for the running workload). **Start from the image's shipped policy and
+add entries**; don't write one from scratch:
+
+```sh
+openshell sandbox exec -n <any-sandbox> -- cat /etc/openshell/policy.yaml > my-policy.yaml
+# edit my-policy.yaml — e.g. add { host: downloads.claude.ai, port: 443 } under claude_code
+openshell-driver-applecontainer --network-policy-file "$(pwd)/my-policy.yaml"
+```
+
+This is a **driver-wide, operator-only** control — there is no per-sandbox equivalent, and it
+cannot be set through `--driver-config-json`, because it changes the guest's own security
+policy for every sandbox this driver instance boots, not just this driver's own behavior. See
+[SECURITY.md](SECURITY.md) for the trust model.
 
 ## Manual operation (development)
 
