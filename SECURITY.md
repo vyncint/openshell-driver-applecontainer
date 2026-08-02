@@ -46,16 +46,19 @@ Run the same scans locally with `make sec` (see CONTRIBUTING.md).
 - Known, documented degradation: the default guest kernel lacks Landlock, so OpenShell
   filesystem policy runs `best_effort` (docs/gate0.md G0.2, README limitations).
 
-## Trust boundary: sandbox specs are trusted input
+## Trust boundary: sandbox specs
 
-The driver treats the sandbox specification it receives from the gateway as trusted. In
-particular, a per-sandbox `--driver-config-json` **volume** mount binds an arbitrary host
-directory (its `source`) into the guest — read-only by default, writable on request — with
-the invoking user's privileges. This is deliberate parity with the upstream docker/podman
-drivers, and is safe in the intended single-user, single-tenant deployment where whoever
-creates sandboxes already has that user's access.
+The driver treats the sandbox specification it receives from the gateway as trusted, but the
+two host-facing knobs a spec can set are gated by operator policy:
 
-Do **not** expose the gateway (and therefore this driver) to untrusted parties who can submit
-sandbox specs without also trusting them with host filesystem access. Constraining volume
-sources to an allowlist is tracked as a future enhancement; until then, the guest **target**
-of a mount is validated (reserved paths rejected) but the host **source** is not.
+- **Host volume mounts are off by default.** A per-sandbox `--driver-config-json` `volume`
+  mount binds a host directory into the guest, so it is rejected unless the driver is started
+  with `--allow-host-mounts`, and `--host-mount-root` further constrains permitted `source`
+  directories. `tmpfs` mounts never touch the host and are always allowed. The guest mount
+  **target** is validated regardless (reserved paths rejected).
+- **The per-sandbox network override is allowlisted.** A spec's `network` must be `--network`
+  or one of `--allowed-networks`; it cannot attach a sandbox to an arbitrary vmnet network.
+
+Even with these gates, treat the ability to submit sandbox specs as privileged in the
+intended single-user, single-tenant deployment. Enabling `--allow-host-mounts` without a
+`--host-mount-root` grants spec authors read/write to any of the invoking user's files.

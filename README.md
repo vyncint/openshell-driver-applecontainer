@@ -131,6 +131,9 @@ changing anything here so the launchd service picks it up:
 | `--namespace` | `default` | namespace reported on sandboxes |
 | `--cpus` / `--memory` | `2` / `2048` (MiB) | VM sizing when the request has no resources |
 | `--kernel` | (runtime default kernel) | host kernel path used for **every** sandbox VM — the fleet-wide Landlock escape hatch; per-sandbox driver config overrides it |
+| `--allow-host-mounts` | `false` | permit per-sandbox `volume` mounts of host directories (see security note below) |
+| `--host-mount-root` | (unset) | when set, `volume` mount sources must live under this directory |
+| `--allowed-networks` | (only `--network`) | comma-separated extra vmnet networks a sandbox may select via driver config |
 | `--log-level` | `info` | driver log level and sandbox default |
 
 `setup` accepts `--network`, `--socket`, `--tls-dir`, `--default-image`, `--supervisor-image`,
@@ -152,9 +155,14 @@ and `--no-pull`.
 ```
 
 - `volume` bind-mounts a host directory (apple/container has no named volumes; `source` is a
-  host path). `read_only` defaults to **true**.
+  host path). `read_only` defaults to **true**. **Volume mounts are off by default** — the
+  driver rejects them unless started with `--allow-host-mounts`, and `--host-mount-root`
+  constrains which host directories are permitted. `tmpfs` mounts never touch the host and
+  are always allowed. See [SECURITY.md](SECURITY.md).
 - Targets at or under `/opt/openshell`, `/etc/openshell`, `/etc/openshell-tls`, `/run/netns`,
   `/sandbox`, or `/openshell-seed` are rejected.
+- `network` selects a vmnet network for this sandbox; it must be `--network` or one of
+  `--allowed-networks`.
 - `kernel` passes through to `container run --kernel` — e.g. a kernel built with Landlock
   enabled (see limitations).
 - Unknown keys are rejected.

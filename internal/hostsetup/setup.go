@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
@@ -36,6 +37,9 @@ type Setup struct {
 	BinPath    string
 	Exec       func(name string, args ...string) (string, error)
 	ExecStream func(name string, args ...string) error
+	// readyTimeout bounds how long to wait for the driver socket after a
+	// (re)start; overridden in tests.
+	readyTimeout time.Duration
 }
 
 // New builds a Setup wired to the real host.
@@ -52,11 +56,12 @@ func New(rt backend.Runtime, log *slog.Logger) (*Setup, error) {
 		bin = resolved
 	}
 	return &Setup{
-		RT:      rt,
-		Log:     log,
-		Home:    home,
-		UID:     os.Getuid(),
-		BinPath: bin,
+		RT:           rt,
+		Log:          log,
+		Home:         home,
+		UID:          os.Getuid(),
+		BinPath:      bin,
+		readyTimeout: 15 * time.Second,
 		Exec: func(name string, args ...string) (string, error) {
 			out, err := exec.Command(name, args...).CombinedOutput()
 			return string(out), err
@@ -126,15 +131,12 @@ func (s *Setup) Run(ctx context.Context, opts Options) error {
 	s.fixCLIRegistrations()
 
 	// 6. The driver itself as a launchd agent (starts at login, restarts
-	// on exit).
+	// on exit). installAgent confirms the service actually started, with a
+	// forced-restart retry, so a failure here is real.
 	if err := s.installAgent(tlsDir, opts.Socket); err != nil {
 		return err
 	}
-	if waitFor(func() bool { _, err := os.Stat(opts.Socket); return err == nil }, 15*time.Second) {
-		step("driver service running", "socket", opts.Socket)
-	} else {
-		s.Log.Warn("driver service did not come up in time; check the log", "log", s.agentLogPath())
-	}
+	step("driver service running", "socket", opts.Socket)
 
 	// 7. Restart the gateway service so it dials the driver.
 	s.restartGatewayService()
@@ -286,16 +288,44 @@ func (s *Setup) installAgent(tlsDir, socket string) error {
 		return err
 	}
 	target := fmt.Sprintf("gui/%d/%s", s.UID, AgentLabel)
+	socketUp := func() bool { _, err := os.Stat(socket); return err == nil }
+	// serviceLoaded reports whether launchd still has the label registered.
+	// This is stricter than "socket exists": a graceful drain removes the
+	// socket up to ~10s before the process exits and launchd unloads it,
+	// and bootstrapping over a still-registered label fails with EIO.
+	serviceLoaded := func() bool { _, err := s.Exec("launchctl", "print", target); return err == nil }
+
 	if out, err := s.Exec("launchctl", "bootout", target); err != nil {
 		s.Log.Debug("launchctl bootout (fresh install is fine)", "out", out, "err", err)
-	} else {
-		// A previous instance drains RPCs for up to 10s and removes its
-		// socket on exit; wait for that so the fresh instance never races
-		// the old one for the socket.
-		waitFor(func() bool { _, err := os.Stat(socket); return err != nil }, 15*time.Second)
 	}
-	if out, err := s.Exec("launchctl", "bootstrap", "gui/"+strconv.Itoa(s.UID), plistPath); err != nil {
-		return fmt.Errorf("launchctl bootstrap failed: %v: %s", err, out)
+	waitFor(func() bool { return !serviceLoaded() }, s.readyTimeout)
+
+	// Bootstrap, retrying while the outgoing instance finishes unloading
+	// (the transient EIO seen right after a binary upgrade).
+	var bootErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		out, err := s.Exec("launchctl", "bootstrap", "gui/"+strconv.Itoa(s.UID), plistPath)
+		if err == nil {
+			bootErr = nil
+			break
+		}
+		bootErr = fmt.Errorf("launchctl bootstrap failed: %v: %s", err, strings.TrimSpace(out))
+		waitFor(func() bool { return !serviceLoaded() }, s.readyTimeout)
+	}
+	if bootErr != nil {
+		return bootErr
+	}
+
+	// Confirm the driver actually started; a bounce can still leave it
+	// loaded-but-not-running. Force a restart and retry once before failing.
+	if !waitFor(socketUp, s.readyTimeout) {
+		s.Log.Warn("setup: driver service did not come up after bootstrap; forcing a restart")
+		if out, err := s.Exec("launchctl", "kickstart", "-k", target); err != nil {
+			s.Log.Debug("launchctl kickstart", "out", out, "err", err)
+		}
+		if !waitFor(socketUp, s.readyTimeout) {
+			return fmt.Errorf("driver service did not start; check the log at %s", logPath)
+		}
 	}
 	s.Log.Info("setup: driver installed as a launchd service", "plist", plistPath, "binary", s.BinPath, "log", logPath)
 	return nil

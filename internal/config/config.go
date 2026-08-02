@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // Env var prefix for every setting; e.g. --socket ↔ OSHL_AC_SOCKET.
@@ -49,6 +50,17 @@ type Config struct {
 	// (container run --kernel) — e.g. a build with Landlock enabled. A
 	// per-sandbox driver-config kernel overrides it.
 	Kernel string
+	// AllowHostMounts gates per-sandbox driver-config volume mounts (host
+	// directory binds). Off by default: a sandbox spec cannot mount host
+	// directories unless the operator opts in. tmpfs mounts are unaffected.
+	AllowHostMounts bool
+	// HostMountRoot, when set, constrains volume-mount sources to this
+	// directory subtree (only meaningful with AllowHostMounts).
+	HostMountRoot string
+	// AllowedNetworks are the vmnet networks a per-sandbox driver-config
+	// network override may select, in addition to Network. Empty means only
+	// Network is permitted.
+	AllowedNetworks []string
 	// LogLevel is the driver's own log level (debug|info|warn|error) and
 	// the default OPENSHELL_LOG_LEVEL for sandboxes without one.
 	LogLevel string
@@ -65,6 +77,15 @@ func envOrInt(name string, def int64) int64 {
 	if v, ok := os.LookupEnv(envPrefix + name); ok {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
+		}
+	}
+	return def
+}
+
+func envOrBool(name string, def bool) bool {
+	if v, ok := os.LookupEnv(envPrefix + name); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return def
@@ -133,15 +154,34 @@ func Parse(args []string) (Config, error) {
 	fs.Int64Var(&cfg.CPUs, "cpus", envOrInt("CPUS", 2), "default vCPUs per sandbox VM")
 	fs.Int64Var(&cfg.MemoryMB, "memory", envOrInt("MEMORY_MB", 2048), "default memory per sandbox VM in MiB")
 	fs.StringVar(&cfg.Kernel, "kernel", envOr("KERNEL", ""), "host kernel path used for every sandbox VM by default (e.g. a Landlock-enabled build); per-sandbox driver config overrides it")
+	fs.BoolVar(&cfg.AllowHostMounts, "allow-host-mounts", envOrBool("ALLOW_HOST_MOUNTS", false), "permit per-sandbox driver-config volume mounts of host directories (off by default)")
+	fs.StringVar(&cfg.HostMountRoot, "host-mount-root", envOr("HOST_MOUNT_ROOT", ""), "when set, volume-mount sources must live under this directory")
+	allowedNetworks := fs.String("allowed-networks", envOr("ALLOWED_NETWORKS", ""), "comma-separated vmnet networks a sandbox may select via driver config, in addition to --network")
 	fs.StringVar(&cfg.LogLevel, "log-level", envOr("LOG_LEVEL", "info"), "log level: debug|info|warn|error")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+	cfg.AllowedNetworks = splitList(*allowedNetworks)
 	if cfg.Socket == "" {
 		return Config{}, fmt.Errorf("config: --socket must not be empty")
 	}
 	if cfg.StateDir == "" {
 		return Config{}, fmt.Errorf("config: --state-dir must not be empty")
 	}
+	if cfg.HostMountRoot != "" && !filepath.IsAbs(cfg.HostMountRoot) {
+		return Config{}, fmt.Errorf("config: --host-mount-root must be an absolute path")
+	}
 	return cfg, nil
+}
+
+// splitList parses a comma-separated flag value into a trimmed, non-empty
+// slice.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

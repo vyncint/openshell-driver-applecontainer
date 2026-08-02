@@ -107,7 +107,11 @@ func (s *Server) validateSandbox(sb *computev1.DriverSandbox) error {
 	if gpu := sb.GetSpec().GetResourceRequirements().GetGpu(); gpu != nil {
 		return status.Error(codes.InvalidArgument, "gpu sandboxes are not supported by the applecontainer driver")
 	}
-	if _, err := parseDriverConfig(sb.GetSpec().GetTemplate().GetDriverConfig()); err != nil {
+	dcfg, err := parseDriverConfig(sb.GetSpec().GetTemplate().GetDriverConfig())
+	if err != nil {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := checkDriverConfigPolicy(s.cfg, dcfg); err != nil {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// A leading dash would be read as a flag when the ref becomes a

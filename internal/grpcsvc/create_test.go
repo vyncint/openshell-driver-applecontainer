@@ -232,6 +232,9 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 func TestCreateSandboxAppliesDriverConfigAndResources(t *testing.T) {
 	fake := &backend.Fake{}
 	srv := newLiveServer(t, fake)
+	// Host mounts and the alternate network are opt-in.
+	srv.cfg.AllowHostMounts = true
+	srv.cfg.AllowedNetworks = []string{"othernet"}
 	client := dialTestServer(t, srv)
 
 	kernelPath := filepath.Join(t.TempDir(), "vmlinux")
