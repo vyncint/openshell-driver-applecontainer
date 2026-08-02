@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -107,11 +109,11 @@ func run(args []string) error {
 	}
 	srv.StartPoller()
 
-	lis, err := listenUnix(cfg.Socket)
+	lis, token, err := listenUnix(cfg.Socket)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(cfg.Socket) }()
+	defer removeSocketIfOwned(cfg.Socket, token, log)
 
 	gs := grpc.NewServer()
 	computev1.RegisterComputeDriverServer(gs, srv)
@@ -154,43 +156,101 @@ func run(args []string) error {
 	return nil
 }
 
+// socketOwnerSuffix names the companion file that records which instance
+// currently owns a bound socket path — see listenUnix and removeSocketIfOwned.
+const socketOwnerSuffix = ".owner"
+
+// newSocketToken generates a random per-process token used to claim
+// ownership of a socket path, so a later instance's bind is distinguishable
+// from this one without relying on filesystem device/inode semantics (which
+// are not guaranteed to change across an unlink-then-rebind on every
+// platform/filesystem).
+func newSocketToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate socket ownership token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// claimSocketOwnership records token as the current owner of path.
+func claimSocketOwnership(path, token string) error {
+	if err := os.WriteFile(path+socketOwnerSuffix, []byte(token), 0o600); err != nil {
+		return fmt.Errorf("write socket ownership marker: %w", err)
+	}
+	return nil
+}
+
+// removeSocketIfOwned unlinks path only if its ownership marker still holds
+// the token this process claimed at bind time. A canceled/short-lived
+// process can be draining in-flight RPCs for up to 10s at shutdown
+// (see run()); if a replacement instance bootstraps and binds the same
+// path during that window, this process's own deferred cleanup must not
+// delete the replacement's live socket out from under it — that would
+// leave the path unreachable even though the new process is healthy.
+func removeSocketIfOwned(path, token string, log *slog.Logger) {
+	got, err := os.ReadFile(path + socketOwnerSuffix)
+	if err != nil {
+		return // marker already gone or unreadable; nothing more to safely do
+	}
+	if string(got) != token {
+		log.Warn("socket path was claimed by a newer instance; leaving it in place", "socket", path)
+		return
+	}
+	_ = os.Remove(path + socketOwnerSuffix)
+	if err := os.Remove(path); err != nil {
+		log.Warn("failed to remove socket", "socket", path, "err", err)
+	}
+}
+
 // listenUnix binds the driver socket with owner-only permissions: parent
 // directory 0700, socket 0600. A live socket (another driver instance)
 // aborts startup; a stale file is removed. The default socket lives under a
 // world-writable /tmp, so the directory is verified to be a real directory
-// owned by us and not a symlink before we trust it.
-func listenUnix(path string) (net.Listener, error) {
+// owned by us and not a symlink before we trust it. The returned token lets
+// the caller safely remove the socket later — see removeSocketIfOwned.
+func listenUnix(path string) (net.Listener, string, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create socket dir: %w", err)
+		return nil, "", fmt.Errorf("create socket dir: %w", err)
 	}
 	if err := verifyOwnedDir(dir); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil { // #nosec G302 -- 0700 on a directory: owner needs the traverse/exec bit
-		return nil, fmt.Errorf("restrict socket dir: %w", err)
+		return nil, "", fmt.Errorf("restrict socket dir: %w", err)
 	}
 	if _, err := os.Stat(path); err == nil {
 		conn, dialErr := net.DialTimeout("unix", path, time.Second)
 		if dialErr == nil {
 			_ = conn.Close()
-			return nil, fmt.Errorf("socket %s is in use by another driver instance", path)
+			return nil, "", fmt.Errorf("socket %s is in use by another driver instance", path)
 		}
 		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("remove stale socket: %w", err)
+			return nil, "", fmt.Errorf("remove stale socket: %w", err)
 		}
+		_ = os.Remove(path + socketOwnerSuffix)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("stat socket: %w", err)
+		return nil, "", fmt.Errorf("stat socket: %w", err)
 	}
 	lis, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", path, err)
+		return nil, "", fmt.Errorf("listen on %s: %w", path, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		_ = lis.Close()
-		return nil, fmt.Errorf("restrict socket: %w", err)
+		return nil, "", fmt.Errorf("restrict socket: %w", err)
 	}
-	return lis, nil
+	token, err := newSocketToken()
+	if err != nil {
+		_ = lis.Close()
+		return nil, "", err
+	}
+	if err := claimSocketOwnership(path, token); err != nil {
+		_ = lis.Close()
+		return nil, "", err
+	}
+	return lis, token, nil
 }
 
 // verifyOwnedDir rejects a socket directory that is a symlink or is not a
