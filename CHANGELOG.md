@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `update` now keeps the replaced binary executable. It staged the new binary in a temp file
+  created with mode 0600 and relied on `OpenFile` to widen it, but `OpenFile` ignores the mode
+  argument for a file that already exists — so the installed binary was left non-executable and
+  the follow-up `setup` failed with "permission denied". The copy now forces the mode
+  explicitly. (regression in v0.2.4's `update`)
+
 ## [0.2.4] - 2026-08-02
 
 ### Added
