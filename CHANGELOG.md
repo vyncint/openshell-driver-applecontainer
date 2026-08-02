@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a race where an old driver instance's deferred socket cleanup could delete a *newer*
+  instance's live socket file if the old one was still draining in-flight RPCs (up to 10s)
+  when the replacement bound the same path — e.g. during a fast restart or upgrade. The
+  listener now records its socket's device+inode at bind time and only unlinks the path at
+  shutdown if it still matches; otherwise it logs a warning and leaves the newer instance's
+  socket in place. (#21)
+
 ### Added
 
 - `--network-policy-file`: an operator-only flag that replaces the sandbox image's baked-in

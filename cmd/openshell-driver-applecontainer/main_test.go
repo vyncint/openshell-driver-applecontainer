@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,7 +34,7 @@ func TestListenUnixRejectsSymlinkedDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Socket dir would be the symlink itself: must be refused.
-	_, err := listenUnix(filepath.Join(link, "driver.sock"))
+	_, _, err := listenUnix(filepath.Join(link, "driver.sock"))
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("want symlink rejection, got %v", err)
 	}
@@ -42,7 +44,7 @@ func TestListenUnixPermissions(t *testing.T) {
 	dir := filepath.Join(shortTempDir(t), "sockdir")
 	path := filepath.Join(dir, "driver.sock")
 
-	lis, err := listenUnix(path)
+	lis, _, err := listenUnix(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +68,7 @@ func TestListenUnixPermissions(t *testing.T) {
 
 func TestListenUnixRejectsLiveSocket(t *testing.T) {
 	path := filepath.Join(shortTempDir(t), "driver.sock")
-	first, err := listenUnix(path)
+	first, _, err := listenUnix(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +85,7 @@ func TestListenUnixRejectsLiveSocket(t *testing.T) {
 		}
 	}()
 
-	if _, err := listenUnix(path); err == nil || !strings.Contains(err.Error(), "in use") {
+	if _, _, err := listenUnix(path); err == nil || !strings.Contains(err.Error(), "in use") {
 		t.Errorf("want in-use error, got %v", err)
 	}
 }
@@ -102,9 +104,53 @@ func TestListenUnixRemovesStaleSocket(t *testing.T) {
 		t.Skip("platform unlinked socket on close; stale case not reproducible")
 	}
 
-	second, err := listenUnix(path)
+	second, _, err := listenUnix(path)
 	if err != nil {
 		t.Fatalf("stale socket not recovered: %v", err)
 	}
 	defer func() { _ = second.Close() }()
+}
+
+// TestRemoveSocketIfOwnedGuardsAgainstReplacement reproduces the exact race
+// from issue #21: an old instance's deferred cleanup must not delete a
+// newer instance's live socket file when the path has been rebound in
+// between.
+func TestRemoveSocketIfOwnedGuardsAgainstReplacement(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "driver.sock")
+
+	// "Old" instance binds first and records its identity.
+	oldLis, oldID, err := listenUnix(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = oldLis.Close() // simulates the listener stopping accepting (GracefulStop)
+
+	// A "newer" instance rebinds the same path while the old one is still
+	// mid-shutdown (this is exactly what a fresh listenUnix call does: the
+	// old socket looks stale/unresponsive, so it's removed and replaced).
+	newLis, newID, err := listenUnix(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = newLis.Close() }()
+
+	if oldID == newID {
+		t.Fatal("test setup invalid: rebinding did not produce a new identity")
+	}
+
+	// The old instance's shutdown now runs its deferred cleanup with its
+	// OWN (now-stale) identity. It must NOT remove the new instance's socket.
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	removeSocketIfOwned(path, oldID, log)
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("newer instance's socket was removed by the old instance's cleanup: %v", err)
+	}
+
+	// A correctly-identified owner (the new instance) can still remove its
+	// own socket normally.
+	removeSocketIfOwned(path, newID, log)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("owned socket should have been removed, got err=%v", err)
+	}
 }
