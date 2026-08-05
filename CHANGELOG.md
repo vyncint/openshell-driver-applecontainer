@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The supervisor image tag now tracks the installed gateway.** It was hardcoded to `0.0.96`
+  while the OpenShell installer resolves its own latest release, so a host running gateway
+  0.0.97 booted every sandbox with a 0.0.96 supervisor — a silent version mismatch, since the
+  supervisor runs inside the sandbox and speaks to the gateway. The driver now reads
+  `openshell-gateway --version` and uses the matching `supervisor:<version>`; `--supervisor-image`
+  (or `OSHL_AC_SUPERVISOR_IMAGE`) still pins it explicitly, and an unpublished matching tag falls
+  back to the pinned one instead of failing every create.
+
+### Added
+
+- Version pinning for the prerequisites, for reproducible installs and upstream rollbacks:
+  `install.sh --openshell-version X.Y.Z --container-version X.Y.Z` (env
+  `OSHL_AC_OPENSHELL_VERSION`, `OSHL_AC_CONTAINER_VERSION`) and
+  `update --all --openshell-version … --container-version …`. Previously only the driver's own
+  release was selectable; OpenShell and apple/container always resolved to latest. OpenShell
+  pinning goes through its official installer (which honors `OPENSHELL_VERSION`), apple/container
+  through `update-container.sh -v`.
+- `setup` reports the resolved driver / gateway / apple-container versions and the supervisor
+  image, and warns when the supervisor tag does not match the gateway.
+
 ## [0.2.6] - 2026-08-02
 
 ### Fixed

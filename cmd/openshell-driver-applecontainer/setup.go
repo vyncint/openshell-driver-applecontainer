@@ -20,6 +20,10 @@ func runSetup(args []string) int {
 		slog.Error("resolve defaults", "err", err)
 		return 1
 	}
+	log := newLogger("info")
+	// Resolve before the flag default is captured, so the pre-pull grabs the
+	// supervisor image the driver will actually use.
+	defaults.ResolveSupervisorImage(log)
 
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	network := fs.String("network", defaults.Network, "vmnet network for sandbox VMs")
@@ -32,7 +36,6 @@ func runSetup(args []string) int {
 		return 2
 	}
 
-	log := newLogger("info")
 	s, err := hostsetup.New(backend.NewCLI(log), log)
 	if err != nil {
 		log.Error("setup failed", "err", err)
@@ -47,6 +50,7 @@ func runSetup(args []string) int {
 		DefaultImage:    *defaultImage,
 		SupervisorImage: *supervisorImage,
 		PullImages:      !*noPull,
+		DriverVersion:   version,
 	}); err != nil {
 		log.Error("setup failed", "err", err)
 		return 1

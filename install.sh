@@ -11,15 +11,20 @@
 # Environment / flags:
 #   -y, --yes            assume "yes" to every prompt (non-interactive)
 #   --no-setup           install the binary but do not run `setup`
-#   --version <vX.Y.Z>   install a specific release (default: latest)
+#   --version <vX.Y.Z>   install a specific driver release (default: latest)
+#   --openshell-version <X.Y.Z>   pin OpenShell (default: its latest release)
+#   --container-version <X.Y.Z>   pin apple/container (default: its latest release)
 #   --prefix <dir>       install prefix (default: /opt/homebrew)
-#   OSHL_AC_VERSION, OSHL_AC_PREFIX, OSHL_AC_YES=1 mirror the flags.
+#   OSHL_AC_VERSION, OSHL_AC_OPENSHELL_VERSION, OSHL_AC_CONTAINER_VERSION,
+#   OSHL_AC_PREFIX, OSHL_AC_YES=1 mirror the flags.
 set -eu
 
 REPO="vyncint/openshell-driver-applecontainer"
 BINARY="openshell-driver-applecontainer"
 PREFIX="${OSHL_AC_PREFIX:-/opt/homebrew}"
 VERSION="${OSHL_AC_VERSION:-}"
+OPENSHELL_VERSION_PIN="${OSHL_AC_OPENSHELL_VERSION:-}"
+CONTAINER_VERSION_PIN="${OSHL_AC_CONTAINER_VERSION:-}"
 ASSUME_YES="${OSHL_AC_YES:-0}"
 RUN_SETUP=1
 
@@ -63,13 +68,25 @@ parse_args() {
 			VERSION="$2"
 			shift
 			;;
+		--openshell-version)
+			[ "$#" -ge 2 ] || err "--openshell-version needs a value"
+			OPENSHELL_VERSION_PIN="$2"
+			shift
+			;;
+		--container-version)
+			[ "$#" -ge 2 ] || err "--container-version needs a value"
+			CONTAINER_VERSION_PIN="$2"
+			shift
+			;;
 		--prefix)
 			[ "$#" -ge 2 ] || err "--prefix needs a value"
 			PREFIX="$2"
 			shift
 			;;
 		-h | --help)
-			sed -n '2,20p' "$0" 2>/dev/null | sed 's/^# \{0,1\}//'
+			# Print the header comment block, stopping at the first code line
+			# (robust to the header growing).
+			awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"
 			exit 0
 			;;
 		*) err "unknown option: $1" ;;
@@ -103,8 +120,12 @@ check_homebrew() {
 
 # install_container downloads and runs Apple's signed installer package.
 install_container() {
-	tag=$(curl -sSf "https://api.github.com/repos/$CONTAINER_REPO/releases/latest" |
-		grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+	if [ -n "$CONTAINER_VERSION_PIN" ]; then
+		tag="$CONTAINER_VERSION_PIN"
+	else
+		tag=$(curl -sSf "https://api.github.com/repos/$CONTAINER_REPO/releases/latest" |
+			grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+	fi
 	[ -n "$tag" ] || err "could not determine the latest apple/container release"
 	pkg="container-${tag}-installer-signed.pkg"
 	url="https://github.com/$CONTAINER_REPO/releases/download/$tag/$pkg"
@@ -141,7 +162,12 @@ check_openshell() {
 		# cannot pass until this driver's `setup` runs afterwards — so a
 		# non-zero exit here is expected. Tolerate it and verify the binary
 		# landed instead; `setup` (run later) brings the gateway up.
-		curl -LsSf "$OPENSHELL_INSTALL_URL" | sh || true
+		if [ -n "$OPENSHELL_VERSION_PIN" ]; then
+			info "installing OpenShell $OPENSHELL_VERSION_PIN (pinned)"
+			curl -LsSf "$OPENSHELL_INSTALL_URL" | OPENSHELL_VERSION="$OPENSHELL_VERSION_PIN" sh || true
+		else
+			curl -LsSf "$OPENSHELL_INSTALL_URL" | sh || true
+		fi
 		need openshell || err "OpenShell installation failed"
 	else
 		err "OpenShell is required"

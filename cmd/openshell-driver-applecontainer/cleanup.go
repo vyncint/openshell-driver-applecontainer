@@ -35,6 +35,9 @@ func runCleanup(args []string) int {
 		return 1
 	}
 	log := newLogger("info")
+	// Remove the supervisor image the driver actually uses, not just the
+	// pinned default.
+	defaults.ResolveSupervisorImage(log)
 	s, err := hostsetup.New(backend.NewCLI(log), log)
 	if err != nil {
 		log.Error("cleanup failed", "err", err)

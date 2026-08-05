@@ -31,10 +31,16 @@ const (
 // service restarts on it. With --all it also updates the prerequisites.
 func runUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
-	targetVersion := fs.String("version", "", "install a specific release (e.g. v0.2.4); default: latest")
+	targetVersion := fs.String("version", "", "install a specific driver release (e.g. v0.2.4); default: latest")
 	noSetup := fs.Bool("no-setup", false, "replace the binary but do not re-run setup")
 	all := fs.Bool("all", false, "also update the prerequisites: OpenShell (brew) and apple/container")
+	openshellVersion := fs.String("openshell-version", "", "with --all: pin OpenShell to this release (e.g. 0.0.97); default: its latest")
+	containerVersion := fs.String("container-version", "", "with --all: pin apple/container to this release (e.g. 1.2.0); default: its latest")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if !*all && (*openshellVersion != "" || *containerVersion != "") {
+		slog.Error("update: --openshell-version/--container-version only apply with --all")
 		return 2
 	}
 	log := newLogger("info")
@@ -58,7 +64,7 @@ func runUpdate(args []string) int {
 	}
 
 	if *all {
-		updatePrerequisites(log)
+		updatePrerequisites(log, *openshellVersion, *containerVersion)
 	}
 
 	if *noSetup {
@@ -213,11 +219,18 @@ func replaceBinary(target, newBin string) error {
 	return streamCmd("sudo", "install", "-m", "0755", newBin, target)
 }
 
-// updatePrerequisites updates OpenShell (brew) and apple/container (via its
-// own installed updater). Best-effort and terminal-attached (brew output,
-// sudo prompts).
-func updatePrerequisites(log *slog.Logger) {
-	if _, err := exec.LookPath("brew"); err == nil {
+// updatePrerequisites updates OpenShell and apple/container. Best-effort and
+// terminal-attached (brew output, sudo prompts). Empty version strings mean
+// "latest"; a pinned version reproduces an exact stack (or rolls one back).
+func updatePrerequisites(log *slog.Logger, openshellVersion, containerVersion string) {
+	if openshellVersion != "" {
+		// brew cannot install an arbitrary tap version, so pinning goes
+		// through OpenShell's own installer, which honors OPENSHELL_VERSION.
+		log.Info("update: installing the pinned OpenShell release", "version", openshellVersion)
+		if err := runOpenShellInstaller(openshellVersion); err != nil {
+			log.Warn("pinned OpenShell install failed", "version", openshellVersion, "err", err)
+		}
+	} else if _, err := exec.LookPath("brew"); err == nil {
 		log.Info("update: upgrading OpenShell (brew)")
 		if err := streamCmd("brew", "upgrade", "openshell"); err != nil {
 			log.Warn("brew upgrade openshell failed (it may already be current)", "err", err)
@@ -230,8 +243,13 @@ func updatePrerequisites(log *slog.Logger) {
 		if err := streamCmd("container", "system", "stop"); err != nil {
 			log.Debug("container system stop", "err", err)
 		}
-		log.Info("update: updating apple/container (its updater needs sudo)")
-		if err := streamCmd(acUpdater); err != nil {
+		acArgs := []string{}
+		if containerVersion != "" {
+			acArgs = append(acArgs, "-v", containerVersion)
+		}
+		log.Info("update: updating apple/container (its updater needs sudo)",
+			"version", orLatest(containerVersion))
+		if err := streamCmd(acUpdater, acArgs...); err != nil {
 			log.Warn("apple/container updater failed", "err", err)
 		}
 		// Bring the runtime back up; the driver needs it. (setup would also
@@ -240,6 +258,43 @@ func updatePrerequisites(log *slog.Logger) {
 			log.Warn("could not restart the container runtime; run `container system start`", "err", err)
 		}
 	}
+}
+
+// openShellInstallURL is OpenShell's official installer; it honors
+// OPENSHELL_VERSION to select a release.
+const openShellInstallURL = "https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh"
+
+// runOpenShellInstaller installs a specific OpenShell release. The script is
+// downloaded to a file and executed with `sh <file>` rather than piped straight
+// into a shell, so a truncated download cannot execute as a partial script.
+// Its gateway health-check cannot pass until setup runs afterwards, so a
+// non-zero exit is expected and not treated as failure — the caller re-runs
+// setup, and the version probe afterwards reveals what actually landed.
+func runOpenShellInstaller(version string) error {
+	tmp, err := os.MkdirTemp("", "oshl-installer-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	script := filepath.Join(tmp, "install.sh")
+	if err := downloadTo(openShellInstallURL, script); err != nil {
+		return fmt.Errorf("download the OpenShell installer: %w", err)
+	}
+	cmd := exec.Command("/bin/sh", script)
+	cmd.Env = append(os.Environ(), "OPENSHELL_VERSION="+version)
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
+	_ = cmd.Run() // expected non-zero: the gateway has no driver until setup
+	if _, err := exec.LookPath("openshell"); err != nil {
+		return fmt.Errorf("openshell binary not present after install: %w", err)
+	}
+	return nil
+}
+
+func orLatest(v string) string {
+	if v == "" {
+		return "latest"
+	}
+	return v
 }
 
 // currentBinaryPath is the real (symlink-resolved) path of the running binary.
