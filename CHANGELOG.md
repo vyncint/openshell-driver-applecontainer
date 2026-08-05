@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-05
+
 ### Fixed
 
 - **The supervisor image tag now tracks the installed gateway.** It was hardcoded to `0.0.96`
@@ -198,7 +200,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.3...v0.2.4
