@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
+	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 	computev1 "github.com/vyncint/openshell-driver-applecontainer/internal/gen/computev1"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/seed"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/state"
@@ -189,8 +190,19 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		}
 	}
 
-	// Supervisor binary (cached per supervisor-image digest).
+	// Supervisor binary (cached per supervisor-image digest). The tag is
+	// matched to the installed gateway; if that release has no published
+	// supervisor image, fall back to the pinned one rather than failing every
+	// create — unless the operator pinned the image themselves, in which case
+	// their choice is honored and the error surfaces.
 	supPath, err := s.extractor.Ensure(ctx, s.cfg.SupervisorImage)
+	if err != nil && !s.cfg.SupervisorImageExplicit {
+		if fb := config.PinnedSupervisorImage(); fb != s.cfg.SupervisorImage {
+			s.log.Warn("supervisor image matching the gateway is unusable; falling back to the pinned release",
+				"image", s.cfg.SupervisorImage, "fallback", fb, "err", err)
+			supPath, err = s.extractor.Ensure(ctx, fb)
+		}
+	}
 	if err != nil {
 		return err
 	}

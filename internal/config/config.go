@@ -7,8 +7,11 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -31,6 +34,10 @@ type Config struct {
 	// SupervisorImage is the release-matched image the openshell-sandbox
 	// binary is extracted from.
 	SupervisorImage string
+	// SupervisorImageExplicit records that the operator pinned
+	// SupervisorImage themselves (flag or env). When false the tag is matched
+	// to the installed gateway — see ResolveSupervisorImage.
+	SupervisorImageExplicit bool
 	// GRPCEndpoint is the gateway endpoint as reachable FROM INSIDE guest
 	// VMs (e.g. https://192.168.65.1:17670). Injected as OPENSHELL_ENDPOINT.
 	GRPCEndpoint string
@@ -112,6 +119,76 @@ func defaultStateDir() string {
 	return filepath.Join(home, ".local", "state", "openshell-applecontainer")
 }
 
+// SupervisorRepo is the registry repository the in-guest supervisor binary is
+// extracted from. Its tag is the OpenShell release version: the supervisor runs
+// inside every sandbox and speaks to the gateway, so a tag that lags the
+// installed gateway is a silent protocol mismatch.
+const SupervisorRepo = "ghcr.io/nvidia/openshell/supervisor"
+
+// PinnedSupervisorTag is the OpenShell release this driver was developed
+// against (see docs/CONTRACT.md). It is the fallback when the installed
+// gateway's version cannot be determined.
+const PinnedSupervisorTag = "0.0.96"
+
+// PinnedSupervisorImage is the fallback supervisor image reference.
+func PinnedSupervisorImage() string {
+	return SupervisorRepo + ":" + PinnedSupervisorTag
+}
+
+// versionRe matches a bare semver-ish version as printed by --version output.
+var versionRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)$`)
+
+// gatewayVersionProbe reads the installed gateway's version; swapped in tests.
+var gatewayVersionProbe = func() string {
+	out, err := exec.Command("openshell-gateway", "--version").Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return ""
+	}
+	m := versionRe.FindStringSubmatch(fields[len(fields)-1])
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// GatewayVersion returns the OpenShell gateway version installed on this host
+// (e.g. "0.0.97"), or "" when it cannot be determined. The driver runs on the
+// same host as the gateway, and the compute-driver contract carries no gateway
+// version, so the binary itself is the only source.
+func GatewayVersion() string { return gatewayVersionProbe() }
+
+// ResolveSupervisorImage matches the supervisor image tag to the OpenShell
+// gateway installed on this host. It is a no-op when the operator pinned
+// --supervisor-image explicitly, and falls back to the pinned tag (with a
+// warning) when the gateway version cannot be read.
+//
+// Shelling out makes this unsuitable for Parse, so callers invoke it right
+// after parsing; forgetting to call it degrades to the pinned tag rather than
+// to an empty image.
+func (c *Config) ResolveSupervisorImage(log *slog.Logger) {
+	if c.SupervisorImageExplicit {
+		return
+	}
+	ver := GatewayVersion()
+	if ver == "" {
+		log.Warn("could not read the OpenShell gateway version; using the pinned supervisor image",
+			"image", c.SupervisorImage,
+			"hint", "pin it with --supervisor-image if the gateway is installed elsewhere")
+		return
+	}
+	want := SupervisorRepo + ":" + ver
+	if want == c.SupervisorImage {
+		return
+	}
+	log.Info("matched the supervisor image to the installed gateway",
+		"gateway_version", ver, "supervisor_image", want)
+	c.SupervisorImage = want
+}
+
 // homebrewGatewayTLSDir is where the Homebrew openshell formula's
 // post-install generates the gateway PKI.
 const homebrewGatewayTLSDir = "/opt/homebrew/var/openshell/tls"
@@ -154,7 +231,7 @@ func Parse(args []string) (Config, error) {
 	fs.StringVar(&cfg.StateDir, "state-dir", envOr("STATE_DIR", defaultStateDir()), "directory for sandbox records and seed material")
 	fs.StringVar(&cfg.Network, "network", envOr("NETWORK", "oshl"), "vmnet network sandbox VMs attach to")
 	fs.StringVar(&cfg.DefaultImage, "default-image", envOr("DEFAULT_IMAGE", "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"), "default sandbox image")
-	fs.StringVar(&cfg.SupervisorImage, "supervisor-image", envOr("SUPERVISOR_IMAGE", "ghcr.io/nvidia/openshell/supervisor:0.0.96"), "image the openshell-sandbox supervisor binary is extracted from")
+	fs.StringVar(&cfg.SupervisorImage, "supervisor-image", envOr("SUPERVISOR_IMAGE", PinnedSupervisorImage()), "image the openshell-sandbox supervisor binary is extracted from (default: matched to the installed gateway's version)")
 	fs.StringVar(&cfg.GRPCEndpoint, "grpc-endpoint", envOr("GRPC_ENDPOINT", ""), "gateway endpoint reachable from guest VMs; auto-derived from the vmnet network's gateway address when unset")
 	fs.StringVar(&cfg.GuestTLSCA, "guest-tls-ca", envOr("GUEST_TLS_CA", filepath.Join(tlsDir, "ca.crt")), "gateway CA certificate handed to sandboxes")
 	fs.StringVar(&cfg.GuestTLSCert, "guest-tls-cert", envOr("GUEST_TLS_CERT", filepath.Join(tlsDir, "client", "tls.crt")), "shared client certificate handed to sandboxes")
@@ -172,6 +249,16 @@ func Parse(args []string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.AllowedNetworks = splitList(*allowedNetworks)
+	// Remember whether the operator pinned the supervisor image themselves; if
+	// they did, ResolveSupervisorImage leaves it alone.
+	if _, ok := os.LookupEnv(envPrefix + "SUPERVISOR_IMAGE"); ok {
+		cfg.SupervisorImageExplicit = true
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "supervisor-image" {
+			cfg.SupervisorImageExplicit = true
+		}
+	})
 	if cfg.Socket == "" {
 		return Config{}, fmt.Errorf("config: --socket must not be empty")
 	}

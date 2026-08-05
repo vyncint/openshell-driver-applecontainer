@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +26,8 @@ type Options struct {
 	DefaultImage    string
 	SupervisorImage string
 	PullImages      bool
+	// DriverVersion is reported in the version summary; "" omits it.
+	DriverVersion string
 }
 
 // Setup orchestrates the host installation. Exec runs a command and
@@ -166,8 +169,58 @@ func (s *Setup) Run(ctx context.Context, opts Options) error {
 		step("skipping image pre-pull; the first sandbox create will pull " + opts.DefaultImage)
 	}
 
+	// 9. Report the resolved component versions so a mismatch is visible.
+	s.logVersions(opts)
+
 	fmt.Printf("\nSetup complete. Try:\n\n    openshell sandbox create --name demo\n    openshell sandbox exec -n demo -- uname -a\n    openshell sandbox delete demo\n\nRe-run `%s setup` any time to repair the installation.\n", filepath.Base(s.BinPath))
 	return nil
+}
+
+// logVersions prints the driver / gateway / apple-container versions actually
+// installed, and warns when the supervisor image tag does not match the
+// gateway. The supervisor runs inside every sandbox and speaks to the gateway,
+// so a lagging tag is a protocol mismatch that otherwise fails silently.
+func (s *Setup) logVersions(opts Options) {
+	gwVer := probeVersion(s.Exec, "openshell-gateway")
+	acVer := probeVersion(s.Exec, "container")
+	s.Log.Info("setup: component versions",
+		"driver", orUnknown(opts.DriverVersion),
+		"openshell_gateway", orUnknown(gwVer),
+		"apple_container", orUnknown(acVer),
+		"supervisor_image", opts.SupervisorImage)
+
+	if gwVer == "" || opts.SupervisorImage == "" {
+		return
+	}
+	if tag := opts.SupervisorImage[strings.LastIndex(opts.SupervisorImage, ":")+1:]; tag != gwVer {
+		s.Log.Warn("setup: supervisor image tag does not match the installed gateway; sandboxes may fail to connect",
+			"gateway", gwVer, "supervisor_tag", tag,
+			"hint", "unset --supervisor-image/OSHL_AC_SUPERVISOR_IMAGE to match it automatically")
+	}
+}
+
+// probeVersion runs `<bin> --version` and returns the trailing semver-ish
+// token, or "" when the binary is absent or prints something unexpected.
+func probeVersion(run func(string, ...string) (string, error), bin string) string {
+	out, err := run(bin, "--version")
+	if err != nil {
+		return ""
+	}
+	for _, f := range strings.Fields(out) {
+		if m := semverRe.FindStringSubmatch(strings.Trim(f, "()")); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+var semverRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)$`)
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
 }
 
 // CleanupOptions configures a cleanup run. The zero value reproduces the

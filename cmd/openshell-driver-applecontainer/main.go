@@ -69,10 +69,14 @@ Usage:
         Idempotent — re-run any time to repair the installation.
 
   openshell-driver-applecontainer update [--version vX.Y.Z] [--all] [--no-setup]
+                                         [--openshell-version X.Y.Z]
+                                         [--container-version X.Y.Z]
         Updates the driver to the latest release (verifying its checksum)
         and re-runs setup so the service restarts on the new binary. --all
         also updates the prerequisites (OpenShell via brew, apple/container
-        via its own updater). --no-setup replaces the binary only.
+        via its own updater); with --all, --openshell-version and
+        --container-version pin those to an exact release instead of latest.
+        --no-setup replaces the binary only.
 
   openshell-driver-applecontainer cleanup [-d | -k] [--all]
         Reverses setup. By default removes only the driver's service and
@@ -100,6 +104,10 @@ func run(args []string) error {
 
 	log := newLogger(cfg.LogLevel)
 	slog.SetDefault(log)
+
+	// Match the supervisor image to the gateway installed on this host unless
+	// the operator pinned it; a lagging tag is a silent protocol mismatch.
+	cfg.ResolveSupervisorImage(log)
 
 	store, err := state.NewStore(cfg.StateDir)
 	if err != nil {

@@ -35,8 +35,10 @@ Both services start at login and restart on failure — nothing to launch by han
 to repair the installation). To upgrade or remove the stack later, see
 [Update and remove](#update-and-remove).
 
-The installer is non-interactive with `-y`, and takes `--no-setup`, `--version vX.Y.Z`, and
-`--prefix <dir>` (or the `OSHL_AC_YES`, `OSHL_AC_VERSION`, `OSHL_AC_PREFIX` env vars).
+The installer is non-interactive with `-y`, and takes `--no-setup`, `--version vX.Y.Z`,
+`--openshell-version X.Y.Z`, `--container-version X.Y.Z`, and `--prefix <dir>` (or the
+`OSHL_AC_YES`, `OSHL_AC_VERSION`, `OSHL_AC_OPENSHELL_VERSION`, `OSHL_AC_CONTAINER_VERSION`,
+`OSHL_AC_PREFIX` env vars). Without the pins each component resolves to its latest release.
 
 ### Update and remove
 
@@ -47,6 +49,8 @@ Two commands manage the stack's lifecycle, mirroring apple/container's own
 openshell-driver-applecontainer update            # update the driver to the latest release, then re-setup
 openshell-driver-applecontainer update --all      # also update OpenShell (brew) and apple/container
 openshell-driver-applecontainer update --version vX.Y.Z   # pin a specific driver release
+openshell-driver-applecontainer update --all --openshell-version 0.0.97 --container-version 1.2.0
+                                                  # pin the prerequisites too (reproducible / rollback)
 
 openshell-driver-applecontainer cleanup           # remove the driver service + gateway wiring (data kept)
 openshell-driver-applecontainer cleanup -d        # also remove driver state, vmnet network and pulled images
@@ -172,7 +176,7 @@ changing anything here so the launchd service picks it up:
 | `--state-dir` | `~/.local/state/openshell-applecontainer` | sandbox records, seed dirs, supervisor cache |
 | `--network` | `oshl` | vmnet network for sandbox VMs (auto-created) |
 | `--default-image` | `ghcr.io/nvidia/openshell-community/sandboxes/base:latest` | advertised via GetCapabilities |
-| `--supervisor-image` | `ghcr.io/nvidia/openshell/supervisor:0.0.96` | release-matched supervisor source |
+| `--supervisor-image` | matched to the installed gateway (falls back to `…/supervisor:0.0.96`) | release-matched supervisor source |
 | `--grpc-endpoint` | **auto-derived** from the vmnet network (`https://<gateway-ip>:17670`) | gateway endpoint as reachable from inside guests |
 | `--guest-tls-ca/cert/key` | auto-detected (`$OPENSHELL_LOCAL_TLS_DIR`, XDG state, or the Homebrew TLS dir) | client TLS triple handed to sandboxes |
 | `--namespace` | `default` | namespace reported on sandboxes |
@@ -302,9 +306,23 @@ recon in `docs/CONTRACT.md`.
 
 ## Compatibility
 
-| driver | OpenShell (pinned tag) | apple/container | host |
+| driver | OpenShell | apple/container | host |
 |---|---|---|---|
-| v0.1.x – v0.2.x | v0.0.96 (`5541398ccbda`) | 1.2.0 | Apple silicon, macOS 26 |
+| v0.1.x – v0.2.x | contract derived from v0.0.96 (`5541398ccbda`); verified against 0.0.96 and 0.0.97 | 1.2.0 | Apple silicon, macOS 26 |
+
+The supervisor runs **inside** every sandbox and speaks to the gateway, so its image tag must
+track the gateway's version. The driver reads the installed gateway's version
+(`openshell-gateway --version`) and pulls the matching `supervisor:<version>` automatically —
+`setup` prints the resolved driver / gateway / apple-container versions and warns on a mismatch.
+Pin it yourself with `--supervisor-image` (or `OSHL_AC_SUPERVISOR_IMAGE`) to opt out; if the
+matching tag is unpublished the driver falls back to the pinned one rather than failing.
+
+Pin the whole stack for a reproducible install (or to roll back a bad upstream release):
+
+```sh
+curl -LsSf …/install.sh | sh -s -- --version v0.2.6 --openshell-version 0.0.97 --container-version 1.2.0
+openshell-driver-applecontainer update --all --openshell-version 0.0.97 --container-version 1.2.0
+```
 
 ## Install from a release (manual)
 

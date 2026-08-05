@@ -18,7 +18,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.DefaultImage != "ghcr.io/nvidia/openshell-community/sandboxes/base:latest" {
 		t.Errorf("default image = %q", cfg.DefaultImage)
 	}
-	if cfg.SupervisorImage != "ghcr.io/nvidia/openshell/supervisor:0.0.96" {
+	// Parse yields the pinned fallback; ResolveSupervisorImage later matches it
+	// to the installed gateway (see supervisor_test.go).
+	if cfg.SupervisorImage != PinnedSupervisorImage() {
 		t.Errorf("supervisor image = %q", cfg.SupervisorImage)
 	}
 	if cfg.CPUs != 2 || cfg.MemoryMB != 2048 {
