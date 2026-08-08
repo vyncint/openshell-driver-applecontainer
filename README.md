@@ -19,8 +19,13 @@ offers to install anything missing, then downloads the driver (verifying its che
 curl -LsSf https://raw.githubusercontent.com/vyncint/openshell-driver-applecontainer/main/install.sh | sh
 ```
 
-> This URL and the release downloads it fetches work once the repository is public. While it is
-> private, use the manual path below.
+Or, if you would rather Homebrew owned the driver — see [Homebrew](#homebrew) for what it does
+and does not install:
+
+```sh
+brew install nvidia/openshell/openshell vyncint/tap/openshell-driver-applecontainer
+openshell-driver-applecontainer setup
+```
 
 Then use OpenShell normally:
 
@@ -62,6 +67,49 @@ openshell-driver-applecontainer cleanup --all -d  # full teardown: also remove O
 apple/container uninstaller: the bare command touches only the driver; `-d`/`--delete-data` also
 removes its data (`-k`/`--keep-data` is the default); `--all` also removes the prerequisites
 (apple/container's uninstaller needs `sudo`). `uninstall` remains as an alias for `cleanup`.
+
+On a Homebrew install `update` does not replace the binary itself — it would overwrite the
+Caskroom behind Homebrew's back — and runs `brew upgrade --cask` instead, then re-runs `setup`
+as usual. `--version` is refused there, because a cask only ever tracks the tap's latest
+release; uninstall the cask and use `install.sh` if you need to pin one.
+
+### Homebrew
+
+```sh
+brew install nvidia/openshell/openshell vyncint/tap/openshell-driver-applecontainer
+openshell-driver-applecontainer setup
+```
+
+Name OpenShell explicitly like that even though the cask declares it as a dependency: Homebrew
+only auto-taps names given on the command line, never a dependency's, so on a host that has not
+tapped `nvidia/openshell` the dependency warns and resolves to nothing. Naming both installs
+both, from a single command, on any host.
+
+Homebrew does *not* install **apple/container** at all — it ships as a signed `.pkg` outside
+Homebrew, so take it from [its releases](https://github.com/apple/container/releases), or let
+`install.sh` do it. The driver binary is unsigned, so the cask strips the quarantine bit on
+install.
+
+`setup` is still yours to run: Homebrew places the binary, `setup` wires the launchd service,
+gateway configuration, vmnet network and images. Re-run it after every `brew upgrade` so the
+service restarts on the new binary.
+
+```sh
+brew upgrade --cask openshell-driver-applecontainer && openshell-driver-applecontainer setup
+brew uninstall --cask openshell-driver-applecontainer        # also unloads the launchd agent
+brew uninstall --zap --cask openshell-driver-applecontainer  # also removes driver state and logs
+```
+
+Already installed with `install.sh` and switching over? Homebrew refuses to link over the
+existing binary (`It seems there is already a Binary at …`), so remove it first — the driver's
+own data and the gateway wiring are untouched, and `setup` restores the service afterwards:
+
+```sh
+openshell-driver-applecontainer cleanup                      # stop the service (keeps data)
+rm -f "$(brew --prefix)/bin/openshell-driver-applecontainer"
+brew install vyncint/tap/openshell-driver-applecontainer     # OpenShell is already installed
+openshell-driver-applecontainer setup
+```
 
 ### Manual install
 
@@ -326,7 +374,7 @@ openshell-driver-applecontainer update --all --openshell-version 0.0.97 --contai
 
 ## Install from a release (manual)
 
-The one-line installer above does this for you. To do it by hand: download the `darwin_arm64`
+The one-line installer and the Homebrew cask both do this for you. To do it by hand: download the `darwin_arm64`
 archive from a [release](https://github.com/vyncint/openshell-driver-applecontainer/releases),
 verify its checksum against `checksums.txt`, unpack into `/opt/homebrew/bin`, clear the
 quarantine bit (unsigned binary), then run `setup`:
@@ -339,10 +387,8 @@ xattr -d com.apple.quarantine /opt/homebrew/bin/openshell-driver-applecontainer
 openshell-driver-applecontainer setup
 ```
 
-<!-- TODO when public: enable the Homebrew tap section in .goreleaser.yaml and document
-     `brew install` here (a private tap is useless). -->
 <!-- Future: sign releases (cosign) so the installer can verify authenticity, not just
-     integrity. -->
+     integrity — and so the Homebrew cask no longer has to strip the quarantine bit. -->
 
 ## Contributing
 

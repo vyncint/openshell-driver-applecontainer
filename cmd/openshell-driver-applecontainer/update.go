@@ -45,22 +45,48 @@ func runUpdate(args []string) int {
 	}
 	log := newLogger("info")
 
-	want := *targetVersion
-	if want == "" {
-		latest, err := latestReleaseTag(updateRepo)
-		if err != nil {
-			log.Error("update: could not determine the latest release; pass --version", "err", err)
+	self, err := currentBinaryPath()
+	if err != nil {
+		log.Error("update: locate the running binary", "err", err)
+		return 1
+	}
+	// Re-running setup goes through the launch path, not the resolved one: a
+	// brew upgrade replaces the Caskroom version directory, so the resolved
+	// path is gone by the time setup runs. The symlink in <prefix>/bin is not.
+	setupPath := self
+
+	if cask, brewManaged := homebrewCask(self); brewManaged {
+		if *targetVersion != "" {
+			log.Error("update: this install is managed by Homebrew, which only tracks the tap's latest release. "+
+				"To pin a version, remove it (`brew uninstall --cask "+cask+"`) and install with install.sh",
+				"requested", *targetVersion)
+			return 2
+		}
+		log.Info("update: this install is managed by Homebrew; upgrading through brew", "cask", cask)
+		if err := streamCmd("brew", "upgrade", "--cask", cask); err != nil {
+			log.Warn("brew upgrade failed (the cask may already be current)", "cask", cask, "err", err)
+		}
+		if p, execErr := os.Executable(); execErr == nil {
+			setupPath = p
+		}
+	} else {
+		want := *targetVersion
+		if want == "" {
+			latest, err := latestReleaseTag(updateRepo)
+			if err != nil {
+				log.Error("update: could not determine the latest release; pass --version", "err", err)
+				return 1
+			}
+			want = latest
+		}
+
+		log.Info("update: driver", "current", version, "target", want)
+		if want == version {
+			log.Info("update: already on the requested version; re-applying setup", "version", version)
+		} else if err := selfUpdate(log, self, want); err != nil {
+			log.Error("update failed", "err", err)
 			return 1
 		}
-		want = latest
-	}
-
-	log.Info("update: driver", "current", version, "target", want)
-	if want == version {
-		log.Info("update: already on the requested version; re-applying setup", "version", version)
-	} else if err := selfUpdate(log, want); err != nil {
-		log.Error("update failed", "err", err)
-		return 1
 	}
 
 	if *all {
@@ -71,22 +97,32 @@ func runUpdate(args []string) int {
 		log.Info("update: skipping setup (--no-setup); run `" + updateBinaryName + " setup` to restart the service")
 		return 0
 	}
-	self, err := currentBinaryPath()
-	if err != nil {
-		log.Error("update: locate binary for re-setup", "err", err)
-		return 1
-	}
 	log.Info("update: re-running setup to restart the service on the new binary")
-	if err := streamCmd(self, "setup"); err != nil {
+	if err := streamCmd(setupPath, "setup"); err != nil {
 		log.Error("update: setup after update failed; run `"+updateBinaryName+" setup` yourself", "err", err)
 		return 1
 	}
 	return 0
 }
 
+// homebrewCask reports whether binPath is a binary staged by a Homebrew cask,
+// and the cask's token. Cask artifacts live at
+// <brew-prefix>/Caskroom/<token>/<version>/<binary>, symlinked into
+// <brew-prefix>/bin — so replacing that file in place would leave Homebrew
+// believing it still has the version it staged.
+func homebrewCask(binPath string) (string, bool) {
+	parts := strings.Split(filepath.ToSlash(binPath), "/")
+	for i, p := range parts {
+		if p == "Caskroom" && i+1 < len(parts) && parts[i+1] != "" {
+			return parts[i+1], true
+		}
+	}
+	return "", false
+}
+
 // selfUpdate downloads release `version`, verifies its checksum, and replaces
-// the running binary in place.
-func selfUpdate(log *slog.Logger, version string) error {
+// binPath (the running binary) in place.
+func selfUpdate(log *slog.Logger, binPath, version string) error {
 	tmp, err := os.MkdirTemp("", "oshl-ac-update-")
 	if err != nil {
 		return err
@@ -110,10 +146,6 @@ func selfUpdate(log *slog.Logger, version string) error {
 	}
 	log.Info("update: checksum verified")
 
-	binPath, err := currentBinaryPath()
-	if err != nil {
-		return err
-	}
 	extracted := filepath.Join(tmp, updateBinaryName)
 	if err := extractBinaryFromTarGz(archivePath, updateBinaryName, extracted); err != nil {
 		return err

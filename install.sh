@@ -8,6 +8,10 @@
 # OpenShell) and offers to install any that are missing, then downloads the
 # driver release (verifying its checksum) and optionally runs `setup`.
 #
+# There is also `brew install vyncint/tap/openshell-driver-applecontainer`,
+# which installs the driver and OpenShell but not apple/container. This script
+# is the only path that installs everything.
+#
 # Environment / flags:
 #   -y, --yes            assume "yes" to every prompt (non-interactive)
 #   --no-setup           install the binary but do not run `setup`
@@ -181,6 +185,26 @@ resolve_version() {
 	[ -n "$VERSION" ] || err "could not determine the latest release; pass --version"
 }
 
+# check_not_brew_managed refuses to clobber a Homebrew cask install. install(1)
+# replaces brew's symlink with a real file rather than writing through it, so
+# Homebrew would still believe it owned the binary while PATH resolved to a
+# different one — and `brew upgrade` would silently stop taking effect.
+check_not_brew_managed() {
+	target="$PREFIX/bin/$BINARY"
+	[ -L "$target" ] || return 0
+	case "$(readlink "$target")" in
+	*/Caskroom/*) ;;
+	*) return 0 ;;
+	esac
+	err "$target is managed by Homebrew.
+
+  To upgrade it, stay with Homebrew:
+    brew upgrade --cask $BINARY && $BINARY setup
+
+  To switch to this installer, remove the cask first:
+    brew uninstall --cask $BINARY"
+}
+
 install_driver() {
 	need curl || err "curl is required"
 	need shasum || err "shasum is required"
@@ -230,6 +254,7 @@ maybe_setup() {
 main() {
 	parse_args "$@"
 	check_platform
+	check_not_brew_managed
 	check_homebrew
 	check_container
 	check_openshell
