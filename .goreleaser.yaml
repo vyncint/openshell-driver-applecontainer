@@ -123,7 +123,11 @@ homebrew_casks:
           end
     uninstall:
       # Stop and unload the launchd agent `setup` installed, before the binary
-      # it points at disappears.
+      # it points at disappears. Homebrew runs this on UPGRADE as well — only
+      # `signal` is skipped there — so an upgrade removes the driver's service
+      # and `setup` has to put it back. Dropping the directive would avoid that
+      # but leave a real uninstall with a loaded agent respawning a binary that
+      # no longer exists, which is worse.
       launchctl:
         - local.openshell-driver-applecontainer
     # `brew uninstall --zap` territory: state a plain uninstall must not touch.
@@ -147,5 +151,6 @@ homebrew_casks:
 
         openshell-driver-applecontainer setup
 
-      Re-run `setup` after every `brew upgrade` too: it restarts the launchd
-      service onto the new binary.
+      Run it after every upgrade as well. Homebrew removes a cask's launchd
+      service when it replaces the old version, so until `setup` runs again
+      the driver is installed but not running.

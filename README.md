@@ -91,8 +91,12 @@ Homebrew, so take it from [its releases](https://github.com/apple/container/rele
 install.
 
 `setup` is still yours to run: Homebrew places the binary, `setup` wires the launchd service,
-gateway configuration, vmnet network and images. Re-run it after every `brew upgrade` so the
-service restarts on the new binary.
+gateway configuration, vmnet network and images.
+
+**Run `setup` after every upgrade too — it is not optional.** Homebrew replaces a cask by
+uninstalling the old version first, and that runs the cask's `uninstall launchctl:` directive
+(only `signal` is skipped on upgrade), so an upgrade *removes* the driver's launchd service. The
+driver is then installed but not running until `setup` puts it back. `update` does this for you.
 
 ```sh
 brew upgrade --cask openshell-driver-applecontainer && openshell-driver-applecontainer setup
