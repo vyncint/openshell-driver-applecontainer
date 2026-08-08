@@ -83,6 +83,38 @@ func createRequest() *computev1.CreateSandboxRequest {
 	}
 }
 
+// waitForProvisioning blocks until the test sandbox's provisioning task has
+// finished.
+//
+// Reaching a terminal condition is NOT enough to know that: provision() sets
+// the condition and only then returns, and the goroutine closes the entry's
+// done channel after that. So there is a window in which BackendReady (or
+// ProvisioningFailed) is already observable while the entry still counts as
+// in flight — and pollOnce skips in-flight entries by design. A test that
+// drives pollOnce inside that window sees no transition at all.
+//
+// Any test that calls srv.pollOnce after a create must wait here first, unless
+// it is deliberately polling mid-provision like
+// TestPollerSkipsInFlightProvisioning.
+func waitForProvisioning(t *testing.T, srv *Server) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		srv.mu.Lock()
+		e, ok := srv.sandboxes[testSandboxID]
+		srv.mu.Unlock()
+		// done is set once at create and never reassigned, so reading it
+		// off the entry outside the lock is safe.
+		if ok && e.provisionDone() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("provisioning task did not finish")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // waitForCondition polls until the test sandbox's condition reason matches.
 func waitForCondition(t *testing.T, srv *Server, reason string) condition {
 	t.Helper()

@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed a flaky `TestPollerTracksExit` (#38). `provision` sets the sandbox's terminal condition
+  and only then returns, and the entry's `done` channel is closed after that — so a test that
+  waited for `BackendReady` and immediately drove `pollOnce` could land in the window where the
+  entry still counted as in flight, which `pollOnce` skips by design. No transition happened and
+  the test timed out. The affected tests now wait for the provisioning task itself; the same
+  window also let `TestPollerKeepsProvisioningFailure` pass for the wrong reason. Test-only —
+  in production the next 2 s poll covers the window.
+
 ## [0.2.9] - 2026-08-08
 
 ### Fixed

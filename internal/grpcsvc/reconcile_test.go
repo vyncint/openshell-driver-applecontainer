@@ -125,6 +125,9 @@ func TestPollerTracksExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForCondition(t, srv, reasonBackendReady)
+	// The poll below only does anything once the entry is no longer in
+	// flight, and BackendReady becomes visible before that.
+	waitForProvisioning(t, srv)
 
 	// Subscribe before the transition to capture the Warning event.
 	subID, events := srv.hub.subscribe()
@@ -220,6 +223,9 @@ func TestPollerKeepsProvisioningFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForCondition(t, srv, reasonProvisioningFailed)
+	// Without this the poll can skip the entry as still in flight, and the
+	// assertion below would hold for the wrong reason.
+	waitForProvisioning(t, srv)
 
 	// The VM never existed; polling must keep the original failure.
 	srv.pollOnce(context.Background())
