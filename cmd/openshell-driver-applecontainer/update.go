@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/vyncint/openshell-driver-applecontainer/internal/hostsetup"
 )
 
 const (
@@ -55,7 +57,9 @@ func runUpdate(args []string) int {
 	// path is gone by the time setup runs. The symlink in <prefix>/bin is not.
 	setupPath := self
 
-	if cask, brewManaged := homebrewCask(self); brewManaged {
+	// Replacing a cask's staged binary in place would leave Homebrew believing
+	// it still has the version it staged, so let brew do the upgrade.
+	if cask, brewManaged := hostsetup.HomebrewCask(self); brewManaged {
 		if *targetVersion != "" {
 			log.Error("update: this install is managed by Homebrew, which only tracks the tap's latest release. "+
 				"To pin a version, remove it (`brew uninstall --cask "+cask+"`) and install with install.sh",
@@ -103,21 +107,6 @@ func runUpdate(args []string) int {
 		return 1
 	}
 	return 0
-}
-
-// homebrewCask reports whether binPath is a binary staged by a Homebrew cask,
-// and the cask's token. Cask artifacts live at
-// <brew-prefix>/Caskroom/<token>/<version>/<binary>, symlinked into
-// <brew-prefix>/bin — so replacing that file in place would leave Homebrew
-// believing it still has the version it staged.
-func homebrewCask(binPath string) (string, bool) {
-	parts := strings.Split(filepath.ToSlash(binPath), "/")
-	for i, p := range parts {
-		if p == "Caskroom" && i+1 < len(parts) && parts[i+1] != "" {
-			return parts[i+1], true
-		}
-	}
-	return "", false
 }
 
 // selfUpdate downloads release `version`, verifies its checksum, and replaces
