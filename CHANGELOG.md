@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Homebrew install**: `brew install vyncint/tap/openshell-driver-applecontainer`. Every release
+  now publishes a cask to [vyncint/homebrew-tap](https://github.com/vyncint/homebrew-tap) — a cask
+  rather than a formula because Homebrew treats pre-built binaries that way, and because a cask can
+  strip the quarantine bit from our unsigned binary. It declares OpenShell as a dependency (so brew
+  installs the gateway too), unloads the driver's launchd agent on `brew uninstall`, and removes the
+  driver's state, plist and log on `--zap`. apple/container stays outside Homebrew's reach (signed
+  `.pkg`) and is covered by the caveats. Pre-releases are not published to the tap.
+- `install.sh` and the manual path are unchanged and still the way to install everything —
+  including apple/container — in one step.
+
+### Fixed
+
+- `update` no longer corrupts a Homebrew installation. It resolves symlinks to find the running
+  binary, which for a cask points inside `Caskroom/<token>/<version>/`, so replacing it in place
+  left Homebrew convinced it still had the version it staged (and a later `brew upgrade` or
+  `uninstall` acting on the wrong files). It now detects a cask install, delegates to
+  `brew upgrade --cask`, and re-runs `setup` through the Homebrew symlink rather than the
+  now-replaced version directory. `--version` is rejected for cask installs, which can only track
+  the tap's latest release.
+
 ## [0.2.7] - 2026-08-05
 
 ### Fixed

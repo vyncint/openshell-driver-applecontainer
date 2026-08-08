@@ -56,22 +56,85 @@ changelog:
 release:
   prerelease: auto
   footer: |
-    Unsigned binary: after download, run
-    `xattr -d com.apple.quarantine openshell-driver-applecontainer`.
+    Install: `brew install vyncint/tap/openshell-driver-applecontainer`, or the
+    one-line installer (which also installs the prerequisites):
+    `curl -LsSf https://raw.githubusercontent.com/vyncint/openshell-driver-applecontainer/main/install.sh | sh`.
+
+    Unpacking the archive by hand instead? The binary is unsigned — run
+    `xattr -d com.apple.quarantine openshell-driver-applecontainer` after extracting.
 
     Compatibility: OpenShell v0.0.96, apple/container 1.2.0, Apple silicon macOS 26.
 
-# TODO when the repository goes public: enable the Homebrew tap (a private
-# tap is useless — brew cannot fetch from private release assets without
-# extra credentials).
-#
-# brews:
-#   - repository:
-#       owner: vyncint
-#       name: homebrew-tap
-#     directory: Formula
-#     homepage: https://github.com/vyncint/openshell-driver-applecontainer
-#     description: OpenShell compute driver backed by apple/container micro-VMs
-#     license: Apache-2.0
-#     install: |
-#       bin.install "openshell-driver-applecontainer"
+# Published to https://github.com/vyncint/homebrew-tap as a cask, not a formula:
+# Homebrew treats pre-built binaries as casks, and a cask handles the quarantine
+# bit on our unsigned binary natively. The tap is pushed over SSH with a
+# write-scoped deploy key, because the workflow's GITHUB_TOKEN is scoped to this
+# repository and cannot commit to the tap.
+homebrew_casks:
+  - name: openshell-driver-applecontainer
+    ids:
+      - default
+    repository:
+      owner: vyncint
+      name: homebrew-tap
+      branch: main
+      git:
+        url: "git@github.com:vyncint/homebrew-tap.git"
+        private_key: "{{ .Env.HOMEBREW_TAP_DEPLOY_KEY_PATH }}"
+        # Explicit so the push does not depend on the runner's ssh defaults or
+        # on github.com already being in its known_hosts.
+        ssh_command: "ssh -i {{ .Env.HOMEBREW_TAP_DEPLOY_KEY_PATH }} -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    directory: Casks
+    homepage: https://github.com/vyncint/openshell-driver-applecontainer
+    description: OpenShell compute driver backed by apple/container micro-VMs
+    license: Apache-2.0
+    # Pre-releases stay off the tap: `brew upgrade` must never move a user onto one.
+    skip_upload: auto
+    commit_author:
+      name: Vyncint Ng
+      email: vyncint@users.noreply.github.com
+    commit_msg_template: "chore: openshell-driver-applecontainer {{ .Tag }}"
+    binaries:
+      - openshell-driver-applecontainer
+    # The gateway this driver plugs into. apple/container cannot be declared —
+    # it ships as a signed .pkg outside Homebrew, so the caveats cover it.
+    dependencies:
+      - formula: nvidia/openshell/openshell
+    # apple/container is Apple-silicon-only, so the driver is too. Without this
+    # an Intel Mac fails deep in the download with "no such artifact" instead of
+    # a clear message.
+    custom_block: |
+      depends_on arch: :arm64
+    hooks:
+      post:
+        # Our release binary is unsigned, and Homebrew quarantines everything it
+        # downloads — Gatekeeper would refuse to execute it. Strip the attribute
+        # from the staged binary, as the cask cannot opt out of quarantine.
+        install: |
+          staged = "#{staged_path}/openshell-driver-applecontainer"
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status.zero?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", staged]
+          end
+    uninstall:
+      # Stop and unload the launchd agent `setup` installed, before the binary
+      # it points at disappears.
+      launchctl:
+        - local.openshell-driver-applecontainer
+    # `brew uninstall --zap` territory: state a plain uninstall must not touch.
+    # Kept alphabetical — `brew style` enforces it.
+    zap:
+      trash:
+        - "~/.local/state/openshell-applecontainer"
+        - "~/Library/LaunchAgents/local.openshell-driver-applecontainer.plist"
+        - "~/Library/Logs/openshell-driver-applecontainer.log"
+    caveats: |
+      apple/container is required and is not available through Homebrew.
+      Install it from https://github.com/apple/container/releases (signed .pkg).
+
+      Then wire up the stack — launchd service, gateway configuration, vmnet
+      network, images. Idempotent, so re-run it any time to repair:
+
+        openshell-driver-applecontainer setup
+
+      Re-run `setup` after every `brew upgrade` too: it restarts the launchd
+      service onto the new binary.
