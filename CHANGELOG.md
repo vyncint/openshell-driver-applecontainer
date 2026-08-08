@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-08-08
+
 ### Fixed
 
 - Fixed a flaky `TestPollerTracksExit` (#38). `provision` sets the sandbox's terminal condition
@@ -255,7 +257,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...HEAD
+[0.2.10]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.6...v0.2.7
