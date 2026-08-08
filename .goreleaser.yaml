@@ -96,8 +96,14 @@ homebrew_casks:
     commit_msg_template: "chore: openshell-driver-applecontainer {{ .Tag }}"
     binaries:
       - openshell-driver-applecontainer
-    # The gateway this driver plugs into. apple/container cannot be declared —
-    # it ships as a signed .pkg outside Homebrew, so the caveats cover it.
+    # The gateway this driver plugs into. Homebrew only auto-taps names given on
+    # the command line, never a dependency's, so on a host without the
+    # nvidia/openshell tap this warns and installs nothing instead of resolving
+    # — hence the two-name install in the caveats. The declaration still earns
+    # its keep once the tap is present: brew then installs the gateway with the
+    # driver and warns before removing it out from under one.
+    # apple/container cannot be declared at all — it ships as a signed .pkg
+    # outside Homebrew.
     dependencies:
       - formula: nvidia/openshell/openshell
     # apple/container is Apple-silicon-only, so the driver is too. Without this
@@ -128,8 +134,13 @@ homebrew_casks:
         - "~/Library/LaunchAgents/local.openshell-driver-applecontainer.plist"
         - "~/Library/Logs/openshell-driver-applecontainer.log"
     caveats: |
-      apple/container is required and is not available through Homebrew.
-      Install it from https://github.com/apple/container/releases (signed .pkg).
+      If OpenShell itself was not installed alongside this driver, install it
+      by name so Homebrew taps NVIDIA's tap for you:
+
+        brew install nvidia/openshell/openshell
+
+      apple/container is required too, and is not available through Homebrew.
+      Take it from https://github.com/apple/container/releases (signed .pkg).
 
       Then wire up the stack — launchd service, gateway configuration, vmnet
       network, images. Idempotent, so re-run it any time to repair:

@@ -8,13 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Homebrew install**: `brew install vyncint/tap/openshell-driver-applecontainer`. Every release
-  now publishes a cask to [vyncint/homebrew-tap](https://github.com/vyncint/homebrew-tap) — a cask
-  rather than a formula because Homebrew treats pre-built binaries that way, and because a cask can
-  strip the quarantine bit from our unsigned binary. It declares OpenShell as a dependency (so brew
-  installs the gateway too), unloads the driver's launchd agent on `brew uninstall`, and removes the
-  driver's state, plist and log on `--zap`. apple/container stays outside Homebrew's reach (signed
-  `.pkg`) and is covered by the caveats. Pre-releases are not published to the tap.
+- **Homebrew install**:
+  `brew install nvidia/openshell/openshell vyncint/tap/openshell-driver-applecontainer`. Every
+  release now publishes a cask to [vyncint/homebrew-tap](https://github.com/vyncint/homebrew-tap) —
+  a cask rather than a formula because Homebrew treats pre-built binaries that way, and because a
+  cask can strip the quarantine bit from our unsigned binary. It unloads the driver's launchd agent
+  on `brew uninstall` and removes the driver's state, plist and log on `--zap`; pre-releases are not
+  published to the tap. OpenShell is declared as a dependency but is worth naming on the command
+  line anyway, since Homebrew auto-taps only the names it is given and would otherwise resolve the
+  dependency to nothing on a host without the `nvidia/openshell` tap. apple/container stays outside
+  Homebrew's reach entirely (signed `.pkg`) and is covered by the caveats.
 - `install.sh` and the manual path are unchanged and still the way to install everything —
   including apple/container — in one step.
 

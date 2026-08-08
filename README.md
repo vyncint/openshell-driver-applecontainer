@@ -23,7 +23,7 @@ Or, if you would rather Homebrew owned the driver — see [Homebrew](#homebrew) 
 and does not install:
 
 ```sh
-brew install vyncint/tap/openshell-driver-applecontainer
+brew install nvidia/openshell/openshell vyncint/tap/openshell-driver-applecontainer
 openshell-driver-applecontainer setup
 ```
 
@@ -76,15 +76,19 @@ release; uninstall the cask and use `install.sh` if you need to pin one.
 ### Homebrew
 
 ```sh
-brew install vyncint/tap/openshell-driver-applecontainer
+brew install nvidia/openshell/openshell vyncint/tap/openshell-driver-applecontainer
 openshell-driver-applecontainer setup
 ```
 
-The cask installs **the driver and OpenShell** (a declared dependency, pulled from the
-`nvidia/openshell` tap). It does *not* install **apple/container**, which ships as a signed
-`.pkg` outside Homebrew — take it from
-[its releases](https://github.com/apple/container/releases), or let `install.sh` do it. The
-binary is unsigned, so the cask strips the quarantine bit on install.
+Name OpenShell explicitly like that even though the cask declares it as a dependency: Homebrew
+only auto-taps names given on the command line, never a dependency's, so on a host that has not
+tapped `nvidia/openshell` the dependency warns and resolves to nothing. Naming both installs
+both, from a single command, on any host.
+
+Homebrew does *not* install **apple/container** at all — it ships as a signed `.pkg` outside
+Homebrew, so take it from [its releases](https://github.com/apple/container/releases), or let
+`install.sh` do it. The driver binary is unsigned, so the cask strips the quarantine bit on
+install.
 
 `setup` is still yours to run: Homebrew places the binary, `setup` wires the launchd service,
 gateway configuration, vmnet network and images. Re-run it after every `brew upgrade` so the
@@ -103,7 +107,7 @@ own data and the gateway wiring are untouched, and `setup` restores the service 
 ```sh
 openshell-driver-applecontainer cleanup                      # stop the service (keeps data)
 rm -f "$(brew --prefix)/bin/openshell-driver-applecontainer"
-brew install vyncint/tap/openshell-driver-applecontainer
+brew install vyncint/tap/openshell-driver-applecontainer     # OpenShell is already installed
 openshell-driver-applecontainer setup
 ```
 
