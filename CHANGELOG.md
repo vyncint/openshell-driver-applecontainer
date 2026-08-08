@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `setup` no longer pins the launchd service to a Homebrew version directory. It resolved symlinks
+  before writing the plist, so on a cask install the service pointed at
+  `Caskroom/openshell-driver-applecontainer/<version>/…`, which `brew upgrade` deletes. The plist
+  now keeps Homebrew's `<prefix>/bin` symlink, which is stable across versions; every other
+  symlink is still resolved, so the plist does not depend on one staying put.
+
+### Changed
+
+- Documented that **`brew upgrade` removes the driver's launchd service**, so `setup` must follow
+  it. Homebrew replaces a cask by uninstalling the old version first, which runs the cask's
+  `uninstall launchctl:` directive — Homebrew skips only `signal` on upgrade. Keeping the
+  directive is deliberate: without it a real `brew uninstall` would leave a loaded agent
+  respawning a binary that no longer exists.
+
 ## [0.2.8] - 2026-08-08
 
 ### Added

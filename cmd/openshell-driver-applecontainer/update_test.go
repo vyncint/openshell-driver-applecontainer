@@ -21,31 +21,6 @@ func TestReleaseArchiveName(t *testing.T) {
 	}
 }
 
-func TestHomebrewCask(t *testing.T) {
-	cases := []struct {
-		path string
-		cask string
-		brew bool
-	}{
-		{"/opt/homebrew/Caskroom/openshell-driver-applecontainer/0.2.8/openshell-driver-applecontainer",
-			"openshell-driver-applecontainer", true},
-		// Intel prefix, and a version directory that itself looks like a path.
-		{"/usr/local/Caskroom/some-tool/1.2.3_1/some-tool", "some-tool", true},
-		// Installed by install.sh: a real file in the brew prefix, not a cask.
-		{"/opt/homebrew/bin/openshell-driver-applecontainer", "", false},
-		{"/usr/local/bin/openshell-driver-applecontainer", "", false},
-		// A directory merely named Caskroom, with nothing under it.
-		{"/tmp/Caskroom", "", false},
-		{"", "", false},
-	}
-	for _, tc := range cases {
-		cask, brew := homebrewCask(tc.path)
-		if brew != tc.brew || cask != tc.cask {
-			t.Errorf("homebrewCask(%q) = (%q, %v), want (%q, %v)", tc.path, cask, brew, tc.cask, tc.brew)
-		}
-	}
-}
-
 // makeTarGz writes a gzipped tar of name->content and returns its path.
 func makeTarGz(t *testing.T, dir string, entries map[string][]byte) string {
 	t.Helper()

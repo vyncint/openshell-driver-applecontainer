@@ -65,9 +65,7 @@ func New(rt backend.Runtime, log *slog.Logger) (*Setup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve driver binary path: %w", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
-		bin = resolved
-	}
+	bin = resolveBinPath(bin)
 	return &Setup{
 		RT:              rt,
 		Log:             log,
