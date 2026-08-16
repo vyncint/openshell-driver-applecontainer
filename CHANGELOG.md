@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Build against Go 1.26.6. The `go` directive pinned 1.26.5, which CI installs via
+  `go-version-file`, so every build shipped four standard-library vulnerabilities that Go fixed in
+  1.26.6 and that `govulncheck` reported as reachable from our code: GO-2026-6218 (`net/url`),
+  GO-2026-6090 (`crypto/tls`), GO-2026-5972 (`encoding/asn1`) and GO-2026-5026 (`net/http`). The
+  driver terminates TLS to the gateway and parses URLs and certificates, so all four are on live
+  paths. `govulncheck` is clean again.
+
 ## [0.2.10] - 2026-08-08
 
 ### Fixed
