@@ -1,6 +1,6 @@
 module github.com/vyncint/openshell-driver-applecontainer
 
-go 1.26.5
+go 1.26.6
 
 require (
 	google.golang.org/grpc v1.83.0
