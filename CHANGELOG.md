@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   GO-2026-6090 (`crypto/tls`), GO-2026-5972 (`encoding/asn1`) and GO-2026-5026 (`net/http`). The
   driver terminates TLS to the gateway and parses URLs and certificates, so all four are on live
   paths. `govulncheck` is clean again.
+- A weekly `go-toolchain` workflow now watches for new Go patch releases and files an issue when
+  `go.mod` falls behind, so the next one is caught deliberately rather than as a surprise red
+  `govulncheck` on an unrelated pull request. Dependabot cannot do this — bumping the Go directive
+  is still an open request upstream (dependabot/dependabot-core#13520) — which is now recorded in
+  `dependabot.yml` so nobody adds an inert stanza for it.
 
 ## [0.2.10] - 2026-08-08
 

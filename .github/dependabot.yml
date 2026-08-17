@@ -1,4 +1,9 @@
 version: 2
+# Note: Dependabot does NOT bump the `go` directive in go.mod
+# (dependabot/dependabot-core#13520 is still open), so there is deliberately no
+# stanza for it here — one would be silently inert. Go patch releases are
+# security fixes, and go-version-file installs whatever go.mod pins, so the
+# `go-toolchain` workflow watches for them and files an issue instead.
 updates:
   # Go module dependencies.
   - package-ecosystem: gomod
