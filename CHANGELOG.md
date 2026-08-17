@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-08-17
+
 ### Security
 
 - Build against Go 1.26.6. The `go` directive pinned 1.26.5, which CI installs via
@@ -19,6 +21,12 @@ All notable changes to this project are documented here. The format follows
   `govulncheck` on an unrelated pull request. Dependabot cannot do this — bumping the Go directive
   is still an open request upstream (dependabot/dependabot-core#13520) — which is now recorded in
   `dependabot.yml` so nobody adds an inert stanza for it.
+
+### Changed
+
+- `google.golang.org/protobuf` 1.36.11 → 1.36.12 (upstream bug fixes; the added `prototext`
+  recursion limit and `protodelim` size check do not affect this driver, which speaks the binary
+  wire format over gRPC).
 
 ## [0.2.10] - 2026-08-08
 
@@ -271,7 +279,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.11...HEAD
+[0.2.11]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.7...v0.2.8
