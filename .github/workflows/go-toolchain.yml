@@ -1,0 +1,83 @@
+name: go-toolchain
+
+# Go ships security fixes as patch releases, and go.mod pins an exact patch
+# that setup-go installs verbatim — so a stale pin means every build and every
+# release carries known standard-library vulnerabilities. Dependabot does not
+# bump the Go directive (dependabot/dependabot-core#13520), and govulncheck only
+# surfaces it as a red check on whatever unrelated pull request happens to run
+# next. This watches for the patch instead and files an issue.
+
+on:
+  schedule:
+    # Mondays, a few hours after Go's usual release window.
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare go.mod against the newest patch of its Go minor
+        id: check
+        run: |
+          set -euo pipefail
+          current="$(awk '/^go [0-9]/ {print $2; exit}' go.mod)"
+          minor="${current%.*}"
+          # include=all lists archived patches too, so the newest is found even
+          # when go.dev has already moved the minor out of the stable set.
+          latest="$(curl -sSfL 'https://go.dev/dl/?mode=json&include=all' |
+            sed -n 's/.*"version": "go\([0-9.]*\)".*/\1/p' |
+            awk -v m="${minor}." 'index($0, m) == 1' |
+            sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+          if [ -z "${latest}" ]; then
+            echo "::warning::could not determine the newest ${minor}.x release; skipping"
+            echo "outdated=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "go.mod pins ${current}; newest ${minor}.x is ${latest}"
+          if [ "${current}" = "${latest}" ]; then
+            echo "outdated=false" >> "${GITHUB_OUTPUT}"
+          else
+            {
+              echo "outdated=true"
+              echo "current=${current}"
+              echo "latest=${latest}"
+            } >> "${GITHUB_OUTPUT}"
+          fi
+      - name: File an issue
+        if: steps.check.outputs.outdated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          MARKER: "Go toolchain patch available"
+        run: |
+          set -euo pipefail
+          # One open issue at a time; the body is refreshed by closing and
+          # reopening only when the version actually moves, so re-runs are quiet.
+          existing="$(gh issue list --state open --search "\"${MARKER}\" in:title" \
+            --json number,title --jq '.[0].number // empty')"
+          if [ -n "${existing}" ]; then
+            echo "issue #${existing} is already open; nothing to do"
+            exit 0
+          fi
+          gh issue create \
+            --title "${MARKER}: go.mod pins ${CURRENT}, ${LATEST} is out" \
+            --body "$(printf '%s\n' \
+              "\`go.mod\` pins \`go ${CURRENT}\`, and CI installs exactly that through \`go-version-file\`." \
+              "Go ${LATEST} is available." \
+              "" \
+              "Go patch releases are security and bug fixes only, so a stale pin means every build —" \
+              "including published releases — ships the standard-library vulnerabilities that patch fixed." \
+              "" \
+              "To resolve: set \`go ${LATEST}\` in \`go.mod\`, then confirm \`govulncheck ./...\` is clean." \
+              "" \
+              "Filed automatically by \`.github/workflows/go-toolchain.yml\`. Dependabot does not do this" \
+              "(dependabot/dependabot-core#13520).")"
