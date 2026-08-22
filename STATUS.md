@@ -3,7 +3,8 @@
 Single source of truth for milestone state. Updated at every milestone boundary.
 
 Pinned upstream: OpenShell **v0.0.96** (`5541398ccbda05fd951e08e5741b9ca090717f3a`).
-Host: Apple silicon, macOS 26.6, apple/container 1.2.0, Go 1.26.5.
+Verified against OpenShell 0.0.96, 0.0.97 and 0.0.111.
+Host: Apple silicon, macOS 26.6, apple/container 1.2.0 and 1.2.2, Go 1.26.6.
 
 | Milestone | State | Notes |
 |---|---|---|

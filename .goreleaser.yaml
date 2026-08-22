@@ -63,7 +63,8 @@ release:
     Unpacking the archive by hand instead? The binary is unsigned — run
     `xattr -d com.apple.quarantine openshell-driver-applecontainer` after extracting.
 
-    Compatibility: OpenShell v0.0.96, apple/container 1.2.0, Apple silicon macOS 26.
+    Compatibility: OpenShell 0.0.96 – 0.0.111, apple/container 1.2.0 – 1.2.2, Apple silicon macOS 26.
+    `openshell sandbox stop`/`start` are unimplemented by this driver.
 
 # Published to https://github.com/vyncint/homebrew-tap as a cask, not a formula:
 # Homebrew treats pre-built binaries as casks, and a cask handles the quarantine
