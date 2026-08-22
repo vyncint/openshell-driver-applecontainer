@@ -36,7 +36,7 @@ func runUpdate(args []string) int {
 	targetVersion := fs.String("version", "", "install a specific driver release (e.g. v0.2.4); default: latest")
 	noSetup := fs.Bool("no-setup", false, "replace the binary but do not re-run setup")
 	all := fs.Bool("all", false, "also update the prerequisites: OpenShell (brew) and apple/container")
-	openshellVersion := fs.String("openshell-version", "", "with --all: pin OpenShell to this release (e.g. 0.0.97); default: its latest")
+	openshellVersion := fs.String("openshell-version", "", "with --all: pin OpenShell to this release (e.g. 0.0.111 or v0.0.111); default: its latest")
 	containerVersion := fs.String("container-version", "", "with --all: pin apple/container to this release (e.g. 1.2.0); default: its latest")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -285,6 +285,19 @@ func updatePrerequisites(log *slog.Logger, openshellVersion, containerVersion st
 // OPENSHELL_VERSION to select a release.
 const openShellInstallURL = "https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh"
 
+// openShellReleaseTag turns a user-supplied OpenShell version into the release
+// tag its installer expects. OpenShell tags every release `vX.Y.Z` and uses
+// OPENSHELL_VERSION verbatim as the tag in the asset URL, so a bare `0.0.111`
+// asks for a release that does not exist and the install fails with "the
+// selected release may not include a Homebrew formula". Accept both spellings.
+// `dev` is OpenShell's documented literal for the rolling build; never touch it.
+func openShellReleaseTag(version string) string {
+	if version == "" || version == "dev" || strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
 // runOpenShellInstaller installs a specific OpenShell release. The script is
 // downloaded to a file and executed with `sh <file>` rather than piped straight
 // into a shell, so a truncated download cannot execute as a partial script.
@@ -302,7 +315,7 @@ func runOpenShellInstaller(version string) error {
 		return fmt.Errorf("download the OpenShell installer: %w", err)
 	}
 	cmd := exec.Command("/bin/sh", script)
-	cmd.Env = append(os.Environ(), "OPENSHELL_VERSION="+version)
+	cmd.Env = append(os.Environ(), "OPENSHELL_VERSION="+openShellReleaseTag(version))
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	_ = cmd.Run() // expected non-zero: the gateway has no driver until setup
 	if _, err := exec.LookPath("openshell"); err != nil {

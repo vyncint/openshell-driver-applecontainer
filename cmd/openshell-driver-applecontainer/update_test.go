@@ -21,6 +21,24 @@ func TestReleaseArchiveName(t *testing.T) {
 	}
 }
 
+func TestOpenShellReleaseTag(t *testing.T) {
+	cases := map[string]string{
+		// OpenShell tags releases vX.Y.Z; a bare version 404s on the asset URL.
+		"0.0.111":  "v0.0.111",
+		"0.0.97":   "v0.0.97",
+		"v0.0.111": "v0.0.111",
+		// Empty means "latest" — the installer resolves it itself.
+		"": "",
+		// OpenShell's documented literal for the rolling build.
+		"dev": "dev",
+	}
+	for in, want := range cases {
+		if got := openShellReleaseTag(in); got != want {
+			t.Errorf("openShellReleaseTag(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // makeTarGz writes a gzipped tar of name->content and returns its path.
 func makeTarGz(t *testing.T, dir string, entries map[string][]byte) string {
 	t.Helper()

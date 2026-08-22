@@ -2,6 +2,15 @@
 
 Everything below was derived by reading NVIDIA/OpenShell at tag **v0.0.96**
 (commit `5541398ccbda05fd951e08e5741b9ca090717f3a`). File:line references are into that tree.
+
+> **The upstream contract has grown since.** As of OpenShell v0.0.111 it adds four RPCs —
+> `GetGatewayListenerRequirements`, `StartSandbox`, `EnsureWorkspace`, `DeleteWorkspace` — plus
+> `GetCapabilitiesResponse.gateway_manages_lifecycle` and `DriverSandboxSpec.command` / `.tty`.
+> This driver implements none of them and remains compatible: the gateway maps `Unimplemented`
+> to success for the three optional RPCs, and reaches `StopSandbox`/`StartSandbox` only through
+> the explicit `openshell sandbox stop`/`start` commands or lifecycle sweeps gated on the
+> `gateway_manages_lifecycle` capability this driver does not advertise. Verified live on
+> 0.0.111. The sections below still describe the v0.0.96 baseline this driver was written to.
 The two contract protos are vendored verbatim under `proto/` (see NOTICE).
 
 ## 1. RPC surface (proto/compute_driver.proto, package openshell.compute.v1)

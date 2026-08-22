@@ -16,7 +16,8 @@
 #   -y, --yes            assume "yes" to every prompt (non-interactive)
 #   --no-setup           install the binary but do not run `setup`
 #   --version <vX.Y.Z>   install a specific driver release (default: latest)
-#   --openshell-version <X.Y.Z>   pin OpenShell (default: its latest release)
+#   --openshell-version <X.Y.Z>   pin OpenShell, with or without the leading
+#                                 "v" (default: its latest release)
 #   --container-version <X.Y.Z>   pin apple/container (default: its latest release)
 #   --prefix <dir>       install prefix (default: /opt/homebrew)
 #   OSHL_AC_VERSION, OSHL_AC_OPENSHELL_VERSION, OSHL_AC_CONTAINER_VERSION,
@@ -43,6 +44,18 @@ err() {
 }
 
 need() { command -v "$1" >/dev/null 2>&1; }
+
+# openshell_release_tag turns a user-supplied OpenShell version into the release
+# tag its installer expects. OpenShell tags every release vX.Y.Z and uses
+# OPENSHELL_VERSION verbatim as the tag in the asset URL, so a bare X.Y.Z asks
+# for a release that does not exist. Accept both spellings; `dev` is
+# OpenShell's documented literal for the rolling build and passes through.
+openshell_release_tag() {
+	case "$1" in
+	"" | dev | v*) printf '%s' "$1" ;;
+	*) printf 'v%s' "$1" ;;
+	esac
+}
 
 # confirm asks a yes/no question, reading from the controlling terminal so
 # it works under `curl … | sh`. Returns non-zero for "no" / no terminal.
@@ -167,8 +180,9 @@ check_openshell() {
 		# non-zero exit here is expected. Tolerate it and verify the binary
 		# landed instead; `setup` (run later) brings the gateway up.
 		if [ -n "$OPENSHELL_VERSION_PIN" ]; then
-			info "installing OpenShell $OPENSHELL_VERSION_PIN (pinned)"
-			curl -LsSf "$OPENSHELL_INSTALL_URL" | OPENSHELL_VERSION="$OPENSHELL_VERSION_PIN" sh || true
+			tag=$(openshell_release_tag "$OPENSHELL_VERSION_PIN")
+			info "installing OpenShell $tag (pinned)"
+			curl -LsSf "$OPENSHELL_INSTALL_URL" | OPENSHELL_VERSION="$tag" sh || true
 		else
 			curl -LsSf "$OPENSHELL_INSTALL_URL" | sh || true
 		fi

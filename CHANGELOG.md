@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--openshell-version` never worked.** OpenShell tags every release `vX.Y.Z` and its installer
+  uses `OPENSHELL_VERSION` verbatim as the tag in the asset URL, so the documented
+  `--openshell-version 0.0.97` asked for a release that does not exist and the install died with
+  "the selected release may not include a Homebrew formula". Both the flag (`update --all
+  --openshell-version`) and `install.sh --openshell-version` now normalise a bare `X.Y.Z` to
+  `vX.Y.Z`; an explicit `vX.Y.Z` and OpenShell's `dev` literal pass through untouched. Broken
+  since the flag shipped in v0.2.7.
+
+### Changed
+
+- **Compatibility verified against OpenShell 0.0.111 and apple/container 1.2.2** (previously
+  0.0.97 and 1.2.0), live on the reference machine: create → Ready → exec → delete, egress still
+  blocked by policy, and restart adoption. The contract gained four RPCs after v0.0.96 that this
+  driver does not implement; three are optional by design (the gateway maps `Unimplemented` to
+  success) and `StopSandbox`/`StartSandbox` are reached only by the new
+  `openshell sandbox stop`/`start` commands, which fail with a clear message. README, STATUS and
+  `docs/CONTRACT.md` now spell this out rather than implying the v0.0.96 contract is current.
+
 ## [0.2.11] - 2026-08-17
 
 ### Security
