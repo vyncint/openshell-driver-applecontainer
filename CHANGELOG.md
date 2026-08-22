@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-08-22
+
 ### Fixed
 
 - **`--openshell-version` never worked.** OpenShell tags every release `vX.Y.Z` and its installer
@@ -299,7 +301,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.11...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.12...HEAD
+[0.2.12]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.9...v0.2.10
 [0.2.9]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.8...v0.2.9
