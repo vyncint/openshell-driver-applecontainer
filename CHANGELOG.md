@@ -17,7 +17,13 @@ All notable changes to this project are documented here. The format follows
   Ready → `exec` (kernel 6.18.15, workload uid 998), policy still blocking egress, a `tmpfs`
   driver-config mount (`tmpfs on /scratch type tmpfs (rw,relatime)`, writable), restart adoption,
   and clean delete. Every result matched the baseline. An already-configured guest kernel
-  survives the upgrade, so `ensureKernel()` correctly skips re-downloading.
+  survives the upgrade, so `ensureKernel()` correctly skips re-downloading — this machine stayed
+  on `vmlinux-6.18.15-186`.
+- Note for **fresh** installs on apple/container 1.3.0: `setup` runs
+  `container system kernel set --recommended`, and 1.3.0 points that at Kata 3.32.0, which
+  supplies `vmlinux-6.18.35-197-debug`. Newer than before, and a *debug* build — upstream's
+  choice, not ours, but worth knowing before comparing timings between an upgraded machine and a
+  freshly installed one.
 
 ## [0.2.12] - 2026-08-22
 
