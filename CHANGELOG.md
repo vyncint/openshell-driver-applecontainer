@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Compatibility verified against OpenShell 0.0.113 and apple/container 1.3.0** (previously
+  0.0.111 and 1.2.2). No driver change was needed. `compute_driver.proto` is byte-identical
+  between 0.0.111 and 0.0.113. apple/container 1.3.0 is a minor release with one breaking CLI
+  change — `--scheme auto` removed for image operations — which this driver never used; its
+  `tmpfsMounts()` refactor and new default Kata kernel also proved harmless here.
+- Checked live on the reference machine against a baseline captured on 1.2.2 first: create →
+  Ready → `exec` (kernel 6.18.15, workload uid 998), policy still blocking egress, a `tmpfs`
+  driver-config mount (`tmpfs on /scratch type tmpfs (rw,relatime)`, writable), restart adoption,
+  and clean delete. Every result matched the baseline. An already-configured guest kernel
+  survives the upgrade, so `ensureKernel()` correctly skips re-downloading.
+
 ## [0.2.12] - 2026-08-22
 
 ### Fixed

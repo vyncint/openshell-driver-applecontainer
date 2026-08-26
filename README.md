@@ -54,7 +54,7 @@ Two commands manage the stack's lifecycle, mirroring apple/container's own
 openshell-driver-applecontainer update            # update the driver to the latest release, then re-setup
 openshell-driver-applecontainer update --all      # also update OpenShell (brew) and apple/container
 openshell-driver-applecontainer update --version vX.Y.Z   # pin a specific driver release
-openshell-driver-applecontainer update --all --openshell-version 0.0.111 --container-version 1.2.2
+openshell-driver-applecontainer update --all --openshell-version 0.0.113 --container-version 1.3.0
                                                   # pin the prerequisites too (reproducible / rollback)
 
 openshell-driver-applecontainer cleanup           # remove the driver service + gateway wiring (data kept)
@@ -362,8 +362,9 @@ recon in `docs/CONTRACT.md`.
 
 | driver | OpenShell | apple/container | host |
 |---|---|---|---|
-| v0.2.12+ | contract derived from v0.0.96 (`5541398ccbda`); **verified against 0.0.96, 0.0.97 and 0.0.111** | **1.2.0 and 1.2.2** | Apple silicon, macOS 26 |
-| v0.1.x – v0.2.11 | contract derived from v0.0.96; verified against 0.0.96 and 0.0.97 | 1.2.0 | Apple silicon, macOS 26 |
+| v0.2.13+ | contract derived from v0.0.96 (`5541398ccbda`); **verified against 0.0.96, 0.0.97, 0.0.111 and 0.0.113** | **1.2.0, 1.2.2 and 1.3.0** | Apple silicon, macOS 26 |
+| v0.2.12 | same contract; verified against 0.0.96, 0.0.97 and 0.0.111 | 1.2.0 and 1.2.2 | Apple silicon, macOS 26 |
+| v0.1.x – v0.2.11 | same contract; verified against 0.0.96 and 0.0.97 | 1.2.0 | Apple silicon, macOS 26 |
 
 **Newer gateways stay compatible by design, not by luck.** The contract grew four RPCs after
 v0.0.96 — `GetGatewayListenerRequirements`, `StartSandbox`, `EnsureWorkspace`, `DeleteWorkspace` —
@@ -372,7 +373,7 @@ and this driver implements none of them. Three are explicitly optional: the gate
 in `compute/mod.rs`), which is upstream's stated forward-compatibility contract for independently
 versioned external drivers. `StopSandbox`/`StartSandbox` are the exception, and are reached only
 by an explicit `openshell sandbox stop`/`start`, or by lifecycle sweeps a driver opts into with
-the `gateway_manages_lifecycle` capability, which this driver does not advertise. So on 0.0.111
+the `gateway_manages_lifecycle` capability, which this driver does not advertise. So on 0.0.113
 everything works except those two commands, which fail with a clear message rather than damaging
 anything.
 
@@ -389,8 +390,8 @@ matching tag is unpublished the driver falls back to the pinned one rather than 
 Pin the whole stack for a reproducible install (or to roll back a bad upstream release):
 
 ```sh
-curl -LsSf …/install.sh | sh -s -- --version v0.2.12 --openshell-version 0.0.111 --container-version 1.2.2
-openshell-driver-applecontainer update --all --openshell-version 0.0.111 --container-version 1.2.2
+curl -LsSf …/install.sh | sh -s -- --version v0.2.13 --openshell-version 0.0.113 --container-version 1.3.0
+openshell-driver-applecontainer update --all --openshell-version 0.0.113 --container-version 1.3.0
 ```
 
 ## Install from a release (manual)
