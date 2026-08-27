@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-08-27
+
 ### Changed
 
 - **Compatibility verified against OpenShell 0.0.113 and apple/container 1.3.0** (previously
@@ -320,7 +322,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.12...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.13...HEAD
+[0.2.13]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...v0.2.11
 [0.2.10]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.9...v0.2.10
