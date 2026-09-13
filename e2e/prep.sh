@@ -5,7 +5,8 @@ set -eu
 
 NETWORK="${OSHL_AC_NETWORK:-oshl}"
 DEFAULT_IMAGE="${OSHL_AC_DEFAULT_IMAGE:-ghcr.io/nvidia/openshell-community/sandboxes/base:latest}"
-SUPERVISOR_IMAGE="${OSHL_AC_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:0.0.96}"
+GW_VERSION="$(openshell-gateway --version 2>/dev/null | awk '{print $NF}')"
+SUPERVISOR_IMAGE="${OSHL_AC_SUPERVISOR_IMAGE:-ghcr.io/nvidia/openshell/supervisor:${GW_VERSION:-0.0.96}}"
 
 echo "prep: ensuring container system is running"
 container system status >/dev/null 2>&1 || container system start
