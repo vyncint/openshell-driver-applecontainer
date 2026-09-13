@@ -6,6 +6,93 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`openshell sandbox stop` and `start` now work.** `StopSandbox` powers the micro-VM off with
+  `container stop` and keeps the container, its seed directory and its record; `StartSandbox`
+  boots it again with `container start`, so the supervisor comes back with the same identity,
+  environment and token and dials the gateway as after a fresh create. Both are idempotent. A
+  stopped VM is reported with the `ContainerStopped` condition the gateway recognises, so the
+  sandbox reads as `Stopped` (not `Error`) in `openshell sandbox list`, including across a driver
+  restart — the intent is persisted in the record and honoured by startup reconciliation. The
+  poller never emits the console-tail `Warning` for an intentional stop, and a VM started behind
+  the gateway's back (`container start`) is reported truthfully as running again.
+- **`openshell sandbox create -- <command>` reaches the guest.** The driver now sets
+  `OPENSHELL_MAIN_PROCESS_SPEC` (the versioned JSON transport every upstream driver uses) from
+  `DriverSandboxSpec.command`/`.tty`, so argument boundaries survive without shell parsing and a
+  sandbox created without a command gets the same `/bin/bash -l` scratch process as on docker /
+  podman / the VM driver. `OPENSHELL_SANDBOX_COMMAND` — which no OpenShell release since the
+  contract grew has read — is gone. **Behaviour change:** a command you pass now actually runs
+  as the sandbox's main process, and when it exits the sandbox ends in `Error` (main-process exit
+  is terminal upstream). Earlier releases ignored the command, so `sandbox create -- true` used
+  to leave a running sandbox behind; use `--detach` without a command for that.
+- **`status` subcommand** (alias `doctor`): a read-only, one-line-per-component health report of
+  the whole stack — apple/container version and runtime, guest kernel, vmnet network, gateway
+  version/service/listener, `gateway.env` wiring, certificate SAN for the vmnet address, driver
+  launchd service, a real `GetCapabilities` round trip on the socket (flagging a service still on
+  an older build than the binary you are holding), sandbox counts, supervisor tag vs gateway.
+  Every non-OK line says what to do. Exit status 1 when something needs attention; `--json` for
+  scripts.
+- **`logs` subcommand**: the driver service's log (`-n` lines, `-f` to follow) without
+  remembering the `~/Library/Logs` path.
+- **Compatibility verdicts in `setup`, `status` and the driver log**, from a single
+  `internal/compat` table of verified ranges. In particular the driver now **warns when
+  apple/container is older than 1.3.1**, the release that fixed six Containerization security
+  advisories (container/image id path traversal, unvalidated OCI digests, symlink reads while
+  loading image layouts, unvalidated `WWW-Authenticate` realm — CVE-2026-65388 — and two
+  crashers); the driver pulls and unpacks registry images through that code on every create. The
+  warning carries the exact upgrade command.
+- The remaining new contract RPCs are answered explicitly: `GetGatewayListenerRequirements`
+  returns no requirements (macOS only materialises the vmnet host address while a VM is
+  attached, so the gateway could not bind it at startup), `EnsureWorkspace`/`DeleteWorkspace`
+  succeed as no-ops, and `GetCapabilities` states `gateway_manages_lifecycle=false` on purpose:
+  apple/container VMs outlive the gateway, so it must not stop them at shutdown.
+
+### Changed
+
+- **Contract vendored from OpenShell v0.0.116** (`proto/compute_driver.proto`, regenerated with
+  protoc-gen-go v1.36.12). All twelve RPCs are implemented. Verified live on the reference
+  machine against OpenShell **0.0.116** (gateway + supervisor) — create → Ready → exec → egress
+  blocked → stop → Stopped → start → Ready → exec → command sandbox → delete, plus restart
+  adoption of a running and of a stopped sandbox.
+- **Build against Go 1.26.8** (was 1.26.6; closes #51). Dependencies updated: grpc 1.83.2,
+  x/net 0.59.0, x/sys 0.48.0, x/text 0.42.0. CI pins golangci-lint v2.13.2 and gosec v2.29.0.
+- The poller no longer forks `container ls` every two seconds when there is nothing it could
+  observe (no sandboxes, or only ones mid-create/mid-delete/mid-stop) — an idle driver used to
+  cost a subprocess spawn per tick for no information.
+- Seed material is streamed into place instead of read whole into memory; the supervisor binary
+  is ~18 MB per sandbox, which matters when several boot at once.
+- Setup and the driver now share one TLS-directory resolution (`config.DefaultGuestTLSDir`),
+  Homebrew location first: they could previously pick different bundles on a host that had both.
+- Subprocesses are killed with a bounded wait (`WaitDelay`) so a `container` helper holding the
+  pipes open cannot pin a cancelled call.
+- `e2e/smoke.sh` exercises stop/start and the command spec; `e2e/prep.sh` pulls the supervisor
+  tag matching the installed gateway instead of the 0.0.96 pin.
+
+### Security
+
+- **`--host-mount-root` is enforced on the resolved path.** The check used to be a lexical
+  prefix test, so a symlink inside the permitted root pointing outside it (`<root>/link → /`)
+  passed and bind-mounted the whole disk into a guest — the exact escape the root exists to
+  prevent. Both root and source are now resolved through `EvalSymlinks` first, and a source that
+  does not exist is refused with a precise message. Only affects deployments that opted into
+  `--allow-host-mounts` with a root.
+- **Driver-owned supervisor variables can no longer be supplied through a sandbox's user
+  environment.** A template or spec that set `OPENSHELL_GATEWAY_TLS_SERVER_NAME` could point the
+  supervisor's certificate verification at a name the sandbox author controls and intercept the
+  sandbox JWT; `OPENSHELL_SANDBOX_TOKEN(_FILE)`, `OPENSHELL_ENDPOINT`, the TLS paths, identity
+  fields and `PATH` were likewise overridable in the JSON copy the supervisor injects into exec
+  sessions. Those names are now stripped from the user environment (matching the upstream
+  docker/VM drivers), and names containing `=` or NUL are rejected.
+- `OPENSHELL_NETWORK_RUNTIME_CAPABILITIES` is set explicitly empty (VM-driver parity) and
+  `OPENSHELL_SANDBOX_UID`/`GID` explicitly empty alongside `OPENSHELL_OCI_IMAGE_USER`, so the
+  supervisor resolves the workload identity from the image under the documented contract rather
+  than from whatever the environment happened to contain.
+
+### Removed
+
+- The "StopSandbox returns Unimplemented" limitation and its documentation.
+
 ## [0.2.13] - 2026-08-27
 
 ### Changed
