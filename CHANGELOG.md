@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-13
+
 ### Added
 
 - **`openshell sandbox stop` and `start` now work.** `StopSandbox` powers the micro-VM off with
@@ -409,7 +411,8 @@ All notable changes to this project are documented here. The format follows
 - Live acceptance on the reference machine: create→Ready mean 1.1 s over a 10-cycle soak,
   policy-forbidden egress blocked in-guest (HTTP 403), restart adoption, clean teardown.
 
-[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.13...HEAD
+[Unreleased]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.13...v0.3.0
 [0.2.13]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.12...v0.2.13
 [0.2.12]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.11...v0.2.12
 [0.2.11]: https://github.com/vyncint/openshell-driver-applecontainer/compare/v0.2.10...v0.2.11
