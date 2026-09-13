@@ -16,10 +16,11 @@ const pollInterval = 2 * time.Second
 // startup. apple/container VMs are managed by the system apiserver and
 // survive a driver restart, so the strategy is adopt/mark-failed/clean:
 //
-//   - record + running VM   → adopt as Ready
-//   - record + stopped VM   → terminal ContainerExited
-//   - record + no VM        → terminal ProvisioningFailed
-//   - our labeled VM, no record → orphan, deleted
+//   - record + running VM              → adopt as Ready
+//   - record + stopped VM, stopped=true → ContainerStopped (gateway intent)
+//   - record + stopped VM               → terminal ContainerExited
+//   - record + no VM                    → terminal ProvisioningFailed
+//   - our labeled VM, no record         → orphan, deleted
 func (s *Server) Bootstrap(ctx context.Context) error {
 	records, skipped, err := s.store.List()
 	if err != nil {
@@ -42,9 +43,14 @@ func (s *Server) Bootstrap(ctx context.Context) error {
 	for _, rec := range records {
 		e := &entry{rec: rec}
 		if c, ok := byName[rec.ContainerName]; ok {
-			if c.State == "running" {
+			switch {
+			case c.State == "running":
 				e.cond = readyTrueCondition()
-			} else {
+			case rec.Stopped:
+				// Stopped on purpose through StopSandbox; nothing to
+				// diagnose, and the gateway keeps its Stopped phase.
+				e.cond = stoppedCondition()
+			default:
 				// The VM died while the driver was away; attach its
 				// console tail so the failure is diagnosable through
 				// OpenShell instead of via manual container commands.
@@ -108,8 +114,31 @@ func (s *Server) StartPoller() {
 	}()
 }
 
+// hasPollable reports whether any entry could change state from a poll.
+// With nothing to observe the poller skips the `container ls` round trip —
+// an idle driver used to fork the CLI every two seconds for nothing.
+func (s *Server) hasPollable() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.sandboxes {
+		if e.pollable() {
+			return true
+		}
+	}
+	return false
+}
+
+// pollable reports whether the poller may act on e: not mid-delete, not
+// mid-stop/start, and with provisioning finished.
+func (e *entry) pollable() bool {
+	return !e.deleting && !e.busy && e.provisionDone()
+}
+
 // pollOnce diffs runtime state into conditions and publishes transitions.
 func (s *Server) pollOnce(ctx context.Context) {
+	if !s.hasPollable() {
+		return
+	}
 	containers, err := s.rt.List(ctx, true)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -124,16 +153,28 @@ func (s *Server) pollOnce(ctx context.Context) {
 
 	var changed []*entry
 	var exited []*entry
+	var persist []*entry
 	s.mu.Lock()
 	for _, e := range s.sandboxes {
-		if e.deleting || !e.provisionDone() {
+		if !e.pollable() {
 			continue
 		}
 		var next condition
 		if c, ok := byName[e.rec.ContainerName]; ok {
-			if c.State == "running" {
+			switch {
+			case c.State == "running":
 				next = readyTrueCondition()
-			} else {
+				if e.rec.Stopped {
+					// Someone started the VM behind the gateway's back
+					// (`container start`). The runtime is the truth: report
+					// it running and drop the stopped mark, so a later
+					// out-of-band exit is again an unexpected one.
+					e.rec.Stopped = false
+					persist = append(persist, e)
+				}
+			case e.rec.Stopped:
+				next = stoppedCondition()
+			default:
 				next = exitedCondition()
 			}
 		} else {
@@ -151,6 +192,15 @@ func (s *Server) pollOnce(ctx context.Context) {
 		}
 	}
 	s.mu.Unlock()
+
+	for _, e := range persist {
+		s.mu.Lock()
+		rec := e.rec
+		s.mu.Unlock()
+		if err := s.store.Save(rec); err != nil {
+			s.log.Warn("persist lifecycle state", "sandbox_id", rec.ID, "err", err)
+		}
+	}
 
 	// Fetched only on the transition, never on steady-state polls, and a
 	// logs failure never blocks the transition itself.

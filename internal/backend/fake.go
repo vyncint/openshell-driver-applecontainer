@@ -27,6 +27,13 @@ type Fake struct {
 	// NetworkListError, when set, fails NetworkList calls (simulates an
 	// unreachable container runtime).
 	NetworkListError error
+	// StopError / StartError, when set, fail the next Stop / Start call.
+	StopError  error
+	StartError error
+	// VersionString is what Version reports; "" when unset.
+	VersionString string
+
+	stops, starts []string
 }
 
 type fakeContainer struct {
@@ -146,12 +153,53 @@ func (f *Fake) Stop(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.init()
+	f.stops = append(f.stops, name)
+	if f.StopError != nil {
+		err := f.StopError
+		f.StopError = nil
+		return err
+	}
 	c, ok := f.containers[name]
 	if !ok {
 		return fmt.Errorf("%w: container %q", ErrNotFound, name)
 	}
 	c.ctr.State = "stopped"
 	return nil
+}
+
+func (f *Fake) Start(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.init()
+	f.starts = append(f.starts, name)
+	if f.StartError != nil {
+		err := f.StartError
+		f.StartError = nil
+		return err
+	}
+	c, ok := f.containers[name]
+	if !ok {
+		return fmt.Errorf("%w: container %q", ErrNotFound, name)
+	}
+	c.ctr.State = "running"
+	return nil
+}
+
+// Stops and Starts return the container names passed to Stop and Start.
+func (f *Fake) Stops() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.stops...)
+}
+
+func (f *Fake) Starts() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.starts...)
+}
+
+func (f *Fake) Version(_ context.Context) (string, error) {
+	return f.VersionString, nil
 }
 
 func (f *Fake) List(_ context.Context, all bool) ([]Container, error) {

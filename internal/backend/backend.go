@@ -104,8 +104,14 @@ type Runtime interface {
 	// Delete force-removes a container (running or not). Deleting an
 	// unknown container returns ErrNotFound.
 	Delete(ctx context.Context, name string) error
-	// Stop stops a running container without deleting it.
+	// Stop stops a running container without deleting it. Stopping an
+	// unknown container returns ErrNotFound; an already-stopped one is a
+	// no-op.
 	Stop(ctx context.Context, name string) error
+	// Start boots a previously created or stopped container again, with the
+	// configuration it was created with. Starting an unknown container
+	// returns ErrNotFound; an already-running one is a no-op.
+	Start(ctx context.Context, name string) error
 	// List returns containers; all=true includes non-running ones.
 	List(ctx context.Context, all bool) ([]Container, error)
 	// Get returns a single container by name.
@@ -135,4 +141,8 @@ type Runtime interface {
 	// SystemStart starts the container runtime's system services; it is
 	// idempotent when they already run.
 	SystemStart(ctx context.Context) error
+
+	// Version reports the runtime CLI version ("1.3.0"), or "" when it
+	// cannot be parsed. Used for compatibility and security-advisory checks.
+	Version(ctx context.Context) (string, error)
 }

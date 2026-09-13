@@ -24,9 +24,15 @@ type ExecRunner struct {
 	Log *slog.Logger
 }
 
+// execWaitDelay bounds how long Run waits for a killed child's I/O to drain.
+// Without it a `container` subprocess that forked a helper holding the
+// stdout/stderr pipes open could pin Run past the context cancellation.
+const execWaitDelay = 5 * time.Second
+
 func (r ExecRunner) Run(ctx context.Context, name string, args []string) ([]byte, []byte, error) {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = execWaitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -146,9 +152,52 @@ func (c *CLI) Delete(ctx context.Context, name string) error {
 	return err
 }
 
+// stopGraceSeconds is how long `container stop` lets the guest shut down
+// before it is killed. The supervisor exits promptly on SIGTERM; the margin
+// covers a busy VM flushing its disk.
+const stopGraceSeconds = "10"
+
 func (c *CLI) Stop(ctx context.Context, name string) error {
-	_, err := c.run(ctx, "stop", name)
+	_, err := c.run(ctx, "stop", "--time", stopGraceSeconds, name)
 	return err
+}
+
+func (c *CLI) Start(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "start", name)
+	return err
+}
+
+// Version returns the apple/container CLI version, e.g. "1.3.0", parsed from
+// `container --version` ("container CLI version 1.3.0 (build: release, …)").
+func (c *CLI) Version(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "--version")
+	if err != nil {
+		return "", err
+	}
+	return ParseVersionOutput(string(out)), nil
+}
+
+// ParseVersionOutput extracts the first X.Y.Z token from a `--version` line;
+// "" when none is present.
+func ParseVersionOutput(out string) string {
+	for _, f := range strings.Fields(out) {
+		f = strings.Trim(f, "()v")
+		parts := strings.Split(f, ".")
+		if len(parts) != 3 {
+			continue
+		}
+		ok := true
+		for _, p := range parts {
+			if _, err := strconv.Atoi(p); err != nil {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return f
+		}
+	}
+	return ""
 }
 
 // lsEntry mirrors the subset of `container ls --format json` the driver

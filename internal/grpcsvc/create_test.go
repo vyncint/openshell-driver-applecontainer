@@ -175,28 +175,38 @@ func TestCreateSandboxProvisionsVM(t *testing.T) {
 
 	env := boot.Env
 	wantEnv := map[string]string{
-		"OPENSHELL_ENDPOINT":           "https://192.168.65.1:17670",
-		"OPENSHELL_SANDBOX_ID":         testSandboxID,
-		"OPENSHELL_SANDBOX":            "sb-" + testSandboxID[:8],
-		"OPENSHELL_SSH_SOCKET_PATH":    "/run/openshell/ssh.sock",
-		"OPENSHELL_SANDBOX_COMMAND":    "sleep infinity",
-		"OPENSHELL_LOG_LEVEL":          "debug",
-		"OPENSHELL_TLS_CA":             "/openshell-seed/tls/ca.crt",
-		"OPENSHELL_TLS_CERT":           "/openshell-seed/tls/tls.crt",
-		"OPENSHELL_TLS_KEY":            "/openshell-seed/tls/tls.key",
-		"OPENSHELL_SANDBOX_TOKEN_FILE": "/openshell-seed/auth/sandbox.jwt",
-		"USER_VAR":                     "from-spec", // spec wins over template
-		"TPL_ONLY":                     "1",
-		"HOME":                         "/root",
-		"TERM":                         "xterm",
+		"OPENSHELL_ENDPOINT":        "https://192.168.65.1:17670",
+		"OPENSHELL_SANDBOX_ID":      testSandboxID,
+		"OPENSHELL_SANDBOX":         "sb-" + testSandboxID[:8],
+		"OPENSHELL_SSH_SOCKET_PATH": "/run/openshell/ssh.sock",
+		// No command in the spec: MainProcessConfig::scratch(), exactly as
+		// the upstream docker/podman/vm drivers encode it.
+		"OPENSHELL_MAIN_PROCESS_SPEC":            `{"version":1,"command":["/bin/bash","-l"],"tty":true}`,
+		"OPENSHELL_LOG_LEVEL":                    "debug",
+		"OPENSHELL_TELEMETRY_ENABLED":            "false",
+		"OPENSHELL_NETWORK_RUNTIME_CAPABILITIES": "",
+		"OPENSHELL_SANDBOX_UID":                  "",
+		"OPENSHELL_SANDBOX_GID":                  "",
+		"OPENSHELL_TLS_CA":                       "/openshell-seed/tls/ca.crt",
+		"OPENSHELL_TLS_CERT":                     "/openshell-seed/tls/tls.crt",
+		"OPENSHELL_TLS_KEY":                      "/openshell-seed/tls/tls.key",
+		"OPENSHELL_SANDBOX_TOKEN_FILE":           "/openshell-seed/auth/sandbox.jwt",
+		"USER_VAR":                               "from-spec", // spec wins over template
+		"TPL_ONLY":                               "1",
+		"HOME":                                   "/root",
+		"TERM":                                   "xterm",
 	}
 	for k, v := range wantEnv {
-		if env[k] != v {
-			t.Errorf("env[%s] = %q, want %q", k, env[k], v)
+		got, ok := env[k]
+		if !ok || got != v {
+			t.Errorf("env[%s] = %q (present=%v), want %q", k, got, ok, v)
 		}
 	}
 	if _, ok := env["OPENSHELL_SANDBOX_TOKEN"]; ok {
 		t.Error("raw token must never be in env")
+	}
+	if _, ok := env["OPENSHELL_SANDBOX_COMMAND"]; ok {
+		t.Error("OPENSHELL_SANDBOX_COMMAND is dead upstream and must not be set")
 	}
 	if env["OPENSHELL_OCI_IMAGE_USER"] != "sandbox" {
 		t.Errorf("oci image user = %q, want image's USER", env["OPENSHELL_OCI_IMAGE_USER"])
@@ -454,6 +464,70 @@ func TestValidateRejectsBadDriverConfigAndResources(t *testing.T) {
 	badImage.Sandbox.Spec.Template.Image = "--privileged"
 	if _, err := client.ValidateSandboxCreate(ctx, &computev1.ValidateSandboxCreateRequest{Sandbox: badImage.Sandbox}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("flag-like image ref: want InvalidArgument, got %v", err)
+	}
+}
+
+// TestSandboxEnvMainProcessAndOwnership pins the driver→supervisor env
+// contract: an explicit command is forwarded losslessly (argument boundaries
+// intact, no shell), and a user environment can never override the
+// variables that carry the supervisor's identity or trust anchors.
+func TestSandboxEnvMainProcessAndOwnership(t *testing.T) {
+	cfg := liveTestConfig(t)
+	sb := createRequest().Sandbox
+	sb.Spec.Command = []string{"/bin/sh", "-c", "printf '%s' 'a b'"}
+	sb.Spec.Tty = false
+	sb.Spec.Template.Environment["OPENSHELL_GATEWAY_TLS_SERVER_NAME"] = "evil.example"
+	sb.Spec.Template.Environment["OPENSHELL_SANDBOX_TOKEN"] = "forged"
+	sb.Spec.Environment["OPENSHELL_ENDPOINT"] = "https://attacker:1"
+	sb.Spec.Environment["PATH"] = "/attacker/bin"
+	sb.Spec.Environment["OPENSHELL_SANDBOX_UID"] = "0"
+
+	env, err := sandboxEnv(cfg, sb, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env["OPENSHELL_MAIN_PROCESS_SPEC"]; got != `{"version":1,"command":["/bin/sh","-c","printf '%s' 'a b'"],"tty":false}` {
+		t.Errorf("main process spec = %s", got)
+	}
+	for k, want := range map[string]string{
+		"OPENSHELL_ENDPOINT":    cfg.GRPCEndpoint,
+		"PATH":                  defaultGuestPath,
+		"OPENSHELL_SANDBOX_UID": "",
+	} {
+		if env[k] != want {
+			t.Errorf("user env overrode driver-owned %s: %q", k, env[k])
+		}
+	}
+	for _, k := range []string{"OPENSHELL_GATEWAY_TLS_SERVER_NAME", "OPENSHELL_SANDBOX_TOKEN"} {
+		if _, ok := env[k]; ok {
+			t.Errorf("%s must be stripped from the environment", k)
+		}
+	}
+	// The stripped names must not leak back in through the JSON copy the
+	// supervisor injects into exec sessions either.
+	for _, k := range []string{"OPENSHELL_GATEWAY_TLS_SERVER_NAME", "OPENSHELL_SANDBOX_TOKEN", "OPENSHELL_ENDPOINT", "PATH"} {
+		if strings.Contains(env["OPENSHELL_USER_ENVIRONMENT"], k) {
+			t.Errorf("OPENSHELL_USER_ENVIRONMENT still carries %s: %s", k, env["OPENSHELL_USER_ENVIRONMENT"])
+		}
+	}
+	if !strings.Contains(env["OPENSHELL_USER_ENVIRONMENT"], `"USER_VAR":"from-spec"`) {
+		t.Errorf("legitimate user env lost: %s", env["OPENSHELL_USER_ENVIRONMENT"])
+	}
+
+	// Names that cannot be expressed as KEY=VALUE are rejected outright.
+	bad := createRequest().Sandbox
+	bad.Spec.Environment = map[string]string{"A=B": "x"}
+	if _, err := sandboxEnv(cfg, bad, false); err == nil {
+		t.Error("env name containing '=' must be rejected")
+	}
+}
+
+func TestValidateRejectsEmptyCommandArgv0(t *testing.T) {
+	client := dialTestServer(t, newTestServer(t))
+	req := createRequest()
+	req.Sandbox.Spec.Command = []string{"", "-l"}
+	if _, err := client.ValidateSandboxCreate(context.Background(), &computev1.ValidateSandboxCreateRequest{Sandbox: req.Sandbox}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty argv[0]: want InvalidArgument, got %v", err)
 	}
 }
 
