@@ -193,11 +193,16 @@ func (c *Config) ResolveSupervisorImage(log *slog.Logger) {
 // post-install generates the gateway PKI.
 const homebrewGatewayTLSDir = "/opt/homebrew/var/openshell/tls"
 
-// defaultGuestTLSDir finds the gateway's TLS bundle: an explicit
-// OPENSHELL_LOCAL_TLS_DIR wins, then the first existing of the XDG state
-// location and the Homebrew install location, falling back to the XDG path
+// DefaultGuestTLSDir finds the gateway's TLS bundle: an explicit
+// OPENSHELL_LOCAL_TLS_DIR wins, then the first existing of the Homebrew
+// install location and the XDG state location, falling back to the XDG path
 // (so warnings name where the bundle is expected).
-func defaultGuestTLSDir() string {
+//
+// Homebrew is checked first because the stock `brew services` gateway is the
+// one `setup` wires up and it reads exactly that directory; setup and the
+// driver share this function so they can never disagree about which bundle
+// the guests are handed.
+func DefaultGuestTLSDir() string {
 	if v := os.Getenv("OPENSHELL_LOCAL_TLS_DIR"); v != "" {
 		return v
 	}
@@ -207,7 +212,7 @@ func defaultGuestTLSDir() string {
 	} else if home, err := os.UserHomeDir(); err == nil {
 		xdg = filepath.Join(home, ".local", "state", "openshell", "tls")
 	}
-	for _, dir := range []string{xdg, homebrewGatewayTLSDir} {
+	for _, dir := range []string{homebrewGatewayTLSDir, xdg} {
 		if dir == "" {
 			continue
 		}
@@ -224,7 +229,7 @@ func defaultGuestTLSDir() string {
 // Parse resolves configuration from args (excluding argv[0]) and the
 // environment.
 func Parse(args []string) (Config, error) {
-	tlsDir := defaultGuestTLSDir()
+	tlsDir := DefaultGuestTLSDir()
 	var cfg Config
 	fs := flag.NewFlagSet("openshell-driver-applecontainer", flag.ContinueOnError)
 	fs.StringVar(&cfg.Socket, "socket", envOr("SOCKET", "/tmp/oshl-ac/driver.sock"), "unix socket path for the compute driver gRPC server")
