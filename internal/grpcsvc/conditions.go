@@ -10,12 +10,19 @@ import (
 // condition with type "Ready": status True → Ready; status False → Error
 // unless the reason is in its transient set (lowercased "starting" is; the
 // others here are terminal by design). See docs/CONTRACT.md §4.
+//
+// ContainerStopped is special: it is terminal for derive_phase, but the
+// gateway consults it by name (`driver_snapshot_confirms_stopped`) to
+// complete a StopSandbox transition, and a sandbox already in phase Stopped
+// keeps that phase whatever the driver reports. So an intentional stop reads
+// as Stopped in `openshell sandbox list`, never as Error.
 const (
 	conditionReady = "Ready"
 
 	reasonStarting           = "Starting"
 	reasonBackendReady       = "BackendReady"
 	reasonContainerExited    = "ContainerExited"
+	reasonContainerStopped   = "ContainerStopped"
 	reasonProvisioningFailed = "ProvisioningFailed"
 	reasonDeleting           = "Deleting"
 )
@@ -51,6 +58,10 @@ func readyTrueCondition() condition {
 
 func exitedCondition() condition {
 	return condition{Status: "False", Reason: reasonContainerExited, Message: "Sandbox VM is not running", At: time.Now()}
+}
+
+func stoppedCondition() condition {
+	return condition{Status: "False", Reason: reasonContainerStopped, Message: "Sandbox VM is stopped", At: time.Now()}
 }
 
 func failedCondition(msg string) condition {

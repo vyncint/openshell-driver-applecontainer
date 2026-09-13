@@ -32,13 +32,24 @@ Then use OpenShell normally:
 ```sh
 openshell sandbox create --name demo
 openshell sandbox exec -n demo -- uname -a     # runs inside the micro-VM
+openshell sandbox stop demo                    # powers the VM off, keeps everything
+openshell sandbox start demo                   # boots it again, same identity
 openshell sandbox delete demo
 ```
 
 Both services start at login and restart on failure — nothing to launch by hand, ever.
 `setup` is **idempotent**: re-run it any time (after an upgrade, after changing flags, or just
-to repair the installation). To upgrade or remove the stack later, see
-[Update and remove](#update-and-remove).
+to repair the installation). When anything looks off, ask the driver first:
+
+```sh
+openshell-driver-applecontainer status         # one line per component, exit 1 if unhealthy
+openshell-driver-applecontainer logs -f        # the driver service's log
+```
+
+`status` checks apple/container (version, runtime, guest kernel, known security advisories),
+the vmnet network, the gateway (version, service, listener, certificate SAN, wiring), the
+driver service and socket, and your sandboxes — and every non-OK line says what to do. To
+upgrade or remove the stack later, see [Update and remove](#update-and-remove).
 
 The installer is non-interactive with `-y`, and takes `--no-setup`, `--version vX.Y.Z`,
 `--openshell-version X.Y.Z`, `--container-version X.Y.Z`, and `--prefix <dir>` (or the
@@ -54,7 +65,7 @@ Two commands manage the stack's lifecycle, mirroring apple/container's own
 openshell-driver-applecontainer update            # update the driver to the latest release, then re-setup
 openshell-driver-applecontainer update --all      # also update OpenShell (brew) and apple/container
 openshell-driver-applecontainer update --version vX.Y.Z   # pin a specific driver release
-openshell-driver-applecontainer update --all --openshell-version 0.0.113 --container-version 1.3.0
+openshell-driver-applecontainer update --all --openshell-version 0.0.116 --container-version 1.4.1
                                                   # pin the prerequisites too (reproducible / rollback)
 
 openshell-driver-applecontainer cleanup           # remove the driver service + gateway wiring (data kept)
@@ -147,6 +158,10 @@ One command wires the whole stack permanently:
    service (`brew services restart openshell`).
 7. Pre-pulls the sandbox and supervisor images so the first create is fast
    (skip with `setup --no-pull`).
+8. Prints the installed driver / gateway / apple-container versions with a compatibility
+   verdict — including a warning, with the upgrade command, when apple/container is older than
+   1.3.1 (the release that fixed six Containerization security advisories the driver's image
+   pulls go through).
 
 No flags are needed for any of it: the driver derives the gateway endpoint from the vmnet
 network at startup, finds the TLS bundle in the standard locations, and creates whatever is
@@ -210,9 +225,10 @@ source of truth. See [docs/architecture.md](docs/architecture.md).
 
 | Symptom | Do this |
 |---|---|
-| anything looks broken | re-run `openshell-driver-applecontainer setup` — it repairs all wiring |
-| `openshell status` fails | `brew services info openshell`; gateway log: `/opt/homebrew/var/log/openshell/openshell-gateway.err.log` |
-| sandbox stuck / failed | driver log: `~/Library/Logs/openshell-driver-applecontainer.log`; failed sandboxes carry the guest console tail in their status |
+| anything looks broken | `openshell-driver-applecontainer status` names the broken piece and the fix; `openshell-driver-applecontainer setup` repairs all wiring |
+| `openshell status` fails | `status` shows whether the gateway listens; then `brew services info openshell`; gateway log: `/opt/homebrew/var/log/openshell/openshell-gateway.err.log` |
+| sandbox stuck / failed | `openshell-driver-applecontainer logs` (the service log, `-f` to follow); failed sandboxes carry the guest console tail in their status |
+| `sandbox stop`/`start` refused | the sandbox must be `Ready` to stop and `Stopped` to start (the gateway enforces this); a sandbox that failed to provision cannot be started — delete it |
 | `default kernel not configured for architecture` | apple/container has no guest kernel (a fresh install, or one whose data was deleted). `setup` installs one automatically; if its download failed, retry `container system kernel set --recommended`. On apple/container 1.3.0 that resolves to Kata 3.32.0's `vmlinux-6.18.35-197-debug`; an existing kernel is left alone, so upgraded machines keep the one they had |
 | slow first create | the base image (~2.6 GB) is pulling; `setup` without `--no-pull` pre-pulls it |
 
@@ -241,7 +257,17 @@ changing anything here so the launchd service picks it up:
 | `--log-level` | `info` | driver log level and sandbox default |
 
 `setup` accepts `--network`, `--socket`, `--tls-dir`, `--default-image`, `--supervisor-image`,
-and `--no-pull`.
+and `--no-pull`. `status` takes `--json`; `logs` takes `-n N` and `-f`.
+
+The sandbox's **canonical process** comes from `openshell sandbox create -- <command>` (with
+`--tty`/`--no-tty`), forwarded to the in-guest supervisor as a versioned JSON spec so argument
+boundaries are never re-parsed by a shell; without a command the sandbox gets the same
+`/bin/bash -l` scratch process as on every upstream driver. When that process exits the
+sandbox is finished and reads as `Error` — OpenShell's semantics, so a long-lived sandbox is
+`create --detach` with no command, not `-- true`. A sandbox's user environment
+(`--env`, template environment) is passed through except for the supervisor's own variables
+(`OPENSHELL_ENDPOINT`, the TLS paths and server name, token, identity fields, `PATH`), which are
+driver-owned and stripped — see [SECURITY.md](SECURITY.md).
 
 ## Per-sandbox driver config
 
@@ -351,10 +377,9 @@ recon in `docs/CONTRACT.md`.
 - **No host-side nftables defense layer** — that upstream mechanism is Linux-only. On macOS,
   vmnet NAT already blocks inbound traffic from off the Mac; a pf anchor reproducing the
   "guests may only reach the gateway port" rule is possible future work.
-- `StopSandbox` returns `Unimplemented`. The v0.0.96 gateway never called it; newer ones do, for
-  the `openshell sandbox stop` / `start` commands, so those two commands fail cleanly against this
-  driver ("StopSandbox is not implemented yet") while everything else works. See
-  [Compatibility](#compatibility).
+- `openshell sandbox stop` powers the VM off; **a stopped sandbox keeps its VM, seed directory
+  and record** (that is what lets `start` bring it back with the same identity), so it still
+  occupies disk until deleted.
 - GPU sandboxes are rejected (`ValidateSandboxCreate` fails them explicitly).
 - One `cpuOverhead` vCPU is added by apple/container on top of the requested count.
 
@@ -362,23 +387,34 @@ recon in `docs/CONTRACT.md`.
 
 | driver | OpenShell | apple/container | host |
 |---|---|---|---|
-| v0.2.13+ | contract derived from v0.0.96 (`5541398ccbda`); **verified against 0.0.96, 0.0.97, 0.0.111 and 0.0.113** | **1.2.0, 1.2.2 and 1.3.0** | Apple silicon, macOS 26 |
+| v0.3.0+ | **full v0.0.116 contract** (all twelve RPCs, `command`/`tty`); **verified against 0.0.116**, still compatible back to 0.0.96 | **1.2.0 – 1.4.1** (1.3.1+ recommended — see below); live-verified on 1.3.0 | Apple silicon, macOS 26 |
+| v0.2.13 | contract derived from v0.0.96 (`5541398ccbda`); verified against 0.0.96, 0.0.97, 0.0.111 and 0.0.113 | 1.2.0, 1.2.2 and 1.3.0 | Apple silicon, macOS 26 |
 | v0.2.12 | same contract; verified against 0.0.96, 0.0.97 and 0.0.111 | 1.2.0 and 1.2.2 | Apple silicon, macOS 26 |
 | v0.1.x – v0.2.11 | same contract; verified against 0.0.96 and 0.0.97 | 1.2.0 | Apple silicon, macOS 26 |
 
-**Newer gateways stay compatible by design, not by luck.** The contract grew four RPCs after
-v0.0.96 — `GetGatewayListenerRequirements`, `StartSandbox`, `EnsureWorkspace`, `DeleteWorkspace` —
-and this driver implements none of them. Three are explicitly optional: the gateway maps their
-`Unimplemented` back to success (`Err(status) if status.code() == Code::Unimplemented => Ok(())`
-in `compute/mod.rs`), which is upstream's stated forward-compatibility contract for independently
-versioned external drivers. `StopSandbox`/`StartSandbox` are the exception, and are reached only
-by an explicit `openshell sandbox stop`/`start`, or by lifecycle sweeps a driver opts into with
-the `gateway_manages_lifecycle` capability, which this driver does not advertise. So on 0.0.113
-everything works except those two commands, which fail with a clear message rather than damaging
-anything.
+**Newer gateways stay compatible by design.** Upstream's stated rule for independently versioned
+external drivers is that capability fields are additive and unknown fields are ignored; the
+gateway also maps `Unimplemented` back to success for the optional RPCs. This driver no longer
+relies on that fallback: `StopSandbox`/`StartSandbox` are real (VM power-off/on),
+`EnsureWorkspace`/`DeleteWorkspace` succeed as no-ops (a workspace has no platform resource
+here), and `GetGatewayListenerRequirements` returns none — macOS only materialises the vmnet
+host address while a VM is attached, so the gateway could not bind it at startup, and `setup`
+keeps the gateway on `0.0.0.0` with mTLS required instead. `gateway_manages_lifecycle` is
+deliberately `false`: apple/container VMs outlive the gateway, so it must not stop them at its
+own shutdown or restart them at startup.
 
-Newer spec fields are likewise ignored rather than honoured: `DriverSandboxSpec.command` and
-`.tty`, added after v0.0.96, do not reach the guest.
+**apple/container 1.3.1 or newer is recommended.** 1.3.1 fixed six Containerization security
+advisories (container/image id path traversal, unvalidated OCI descriptor digests, symlink reads
+while loading image layouts, an unvalidated `WWW-Authenticate` realm — CVE-2026-65388 — and two
+unpack crashers) and 1.4.1 two more; the driver pulls and unpacks registry images through that
+code on every create. `setup` and `status` warn on older releases and print the upgrade command:
+
+```sh
+container system stop && sudo /usr/local/bin/update-container.sh -v 1.4.1 && container system start
+```
+
+`sudo` goes on the outside — the updater hides its own `sudo installer` prompt and reports only
+"Installer failed" when run unprivileged.
 
 The supervisor runs **inside** every sandbox and speaks to the gateway, so its image tag must
 track the gateway's version. The driver reads the installed gateway's version
@@ -390,8 +426,8 @@ matching tag is unpublished the driver falls back to the pinned one rather than 
 Pin the whole stack for a reproducible install (or to roll back a bad upstream release):
 
 ```sh
-curl -LsSf …/install.sh | sh -s -- --version v0.2.13 --openshell-version 0.0.113 --container-version 1.3.0
-openshell-driver-applecontainer update --all --openshell-version 0.0.113 --container-version 1.3.0
+curl -LsSf …/install.sh | sh -s -- --version v0.3.0 --openshell-version 0.0.116 --container-version 1.4.1
+openshell-driver-applecontainer update --all --openshell-version 0.0.116 --container-version 1.4.1
 ```
 
 ## Install from a release (manual)

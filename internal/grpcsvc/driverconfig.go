@@ -125,8 +125,10 @@ func checkDriverConfigPolicy(cfg config.Config, dcfg driverConfig) error {
 		if !cfg.AllowHostMounts {
 			return fmt.Errorf("driver config: mounts[%d]: host volume mounts are disabled; start the driver with --allow-host-mounts to permit them", i)
 		}
-		if cfg.HostMountRoot != "" && !pathWithin(cfg.HostMountRoot, m.Source) {
-			return fmt.Errorf("driver config: mounts[%d]: volume source %q is outside the permitted root %s", i, m.Source, cfg.HostMountRoot)
+		if cfg.HostMountRoot != "" {
+			if err := checkSourceWithinRoot(cfg.HostMountRoot, m.Source); err != nil {
+				return fmt.Errorf("driver config: mounts[%d]: %w", i, err)
+			}
 		}
 	}
 	if dcfg.Network != "" && !networkAllowed(cfg, dcfg.Network) {
@@ -146,6 +148,30 @@ func networkAllowed(cfg config.Config, name string) bool {
 		}
 	}
 	return false
+}
+
+// checkSourceWithinRoot enforces --host-mount-root on one volume source. Both
+// paths are resolved through symlinks first: a lexical prefix check alone
+// would let `<root>/link → /` hand the guest the whole disk, which is the
+// exact escape the root exists to prevent. The source must therefore exist
+// (a bind mount of a missing directory fails at boot anyway; failing here
+// gives the caller a precise message).
+func checkSourceWithinRoot(root, source string) error {
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("permitted root %s is not usable: %w", root, err)
+	}
+	realSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		return fmt.Errorf("volume source %q is not usable: %w", source, err)
+	}
+	if !pathWithin(realRoot, realSource) {
+		if realSource != filepath.Clean(source) {
+			return fmt.Errorf("volume source %q resolves to %s, outside the permitted root %s", source, realSource, root)
+		}
+		return fmt.Errorf("volume source %q is outside the permitted root %s", source, root)
+	}
+	return nil
 }
 
 // pathWithin reports whether p is root itself or lies under it, after

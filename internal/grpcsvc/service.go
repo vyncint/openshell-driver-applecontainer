@@ -28,6 +28,11 @@ type entry struct {
 	rec      state.Record
 	cond     condition
 	deleting bool
+	// busy marks a StopSandbox/StartSandbox in flight. The poller skips a
+	// busy entry so it cannot publish the half-way state (a VM observed
+	// stopped a moment before `container start` returns would otherwise be
+	// reported as an unexpected exit).
+	busy bool
 	// cancel aborts an in-flight provisioning task (delete-mid-create).
 	cancel context.CancelFunc
 	// done is closed when the provisioning task finishes.
@@ -92,7 +97,36 @@ func (s *Server) GetCapabilities(_ context.Context, _ *computev1.GetCapabilities
 		DriverName:    DriverName,
 		DriverVersion: s.version,
 		DefaultImage:  s.cfg.DefaultImage,
+		// apple/container VMs belong to the system apiserver and outlive both
+		// this driver and the gateway, so the gateway must not stop them at
+		// its own shutdown or restart them at startup — that is the docker
+		// driver's problem (containers die with the daemon), not ours. A
+		// running sandbox stays running across `brew services restart
+		// openshell`; Bootstrap re-adopts it.
+		GatewayManagesLifecycle: false,
 	}, nil
+}
+
+// GetGatewayListenerRequirements reports no extra listeners. Guests reach
+// the gateway at the vmnet host address, but macOS only materializes that
+// address while a VM is attached to the network, so asking the gateway to
+// bind it at startup would fail with EADDRNOTAVAIL on an idle host. Setup
+// keeps the gateway on 0.0.0.0 with mTLS required instead (see
+// hostsetup.GatewayEnvLines).
+func (s *Server) GetGatewayListenerRequirements(_ context.Context, _ *computev1.GetGatewayListenerRequirementsRequest) (*computev1.GetGatewayListenerRequirementsResponse, error) {
+	return &computev1.GetGatewayListenerRequirementsResponse{}, nil
+}
+
+// EnsureWorkspace and DeleteWorkspace are no-ops: a workspace has no
+// platform resource here (it is a label on the VM and a field in the
+// record), so there is nothing to create or tear down. Answering explicitly
+// rather than leaving the RPCs Unimplemented keeps the gateway's logs clean.
+func (s *Server) EnsureWorkspace(_ context.Context, _ *computev1.EnsureWorkspaceRequest) (*computev1.EnsureWorkspaceResponse, error) {
+	return &computev1.EnsureWorkspaceResponse{}, nil
+}
+
+func (s *Server) DeleteWorkspace(_ context.Context, _ *computev1.DeleteWorkspaceRequest) (*computev1.DeleteWorkspaceResponse, error) {
+	return &computev1.DeleteWorkspaceResponse{}, nil
 }
 
 // validateSandbox holds the checks shared by ValidateSandboxCreate and
@@ -119,6 +153,11 @@ func (s *Server) validateSandbox(sb *computev1.DriverSandbox) error {
 	// pull-first flow already rejects such a ref, but fail fast and clearly.
 	if img := sb.GetSpec().GetTemplate().GetImage(); strings.HasPrefix(img, "-") {
 		return status.Errorf(codes.InvalidArgument, "invalid image reference %q", img)
+	}
+	// The supervisor rejects an empty argv[0] at boot, which would surface
+	// as a sandbox that never becomes Ready; fail the create instead.
+	if cmd := sb.GetSpec().GetCommand(); len(cmd) > 0 && cmd[0] == "" {
+		return status.Error(codes.InvalidArgument, "sandbox command must not start with an empty argument")
 	}
 	res := sb.GetSpec().GetTemplate().GetResources()
 	for _, q := range []string{res.GetCpuRequest(), res.GetCpuLimit()} {
@@ -159,12 +198,6 @@ func (s *Server) ListSandboxes(_ context.Context, _ *computev1.ListSandboxesRequ
 		resp.Sandboxes = append(resp.Sandboxes, s.snapshotLocked(e))
 	}
 	return resp, nil
-}
-
-func (s *Server) StopSandbox(_ context.Context, _ *computev1.StopSandboxRequest) (*computev1.StopSandboxResponse, error) {
-	// The gateway never calls this in v0.0.96; parity with the managed VM
-	// driver until a caller exists.
-	return nil, status.Error(codes.Unimplemented, "StopSandbox is not implemented yet")
 }
 
 func (s *Server) WatchSandboxes(_ *computev1.WatchSandboxesRequest, stream computev1.ComputeDriver_WatchSandboxesServer) error {

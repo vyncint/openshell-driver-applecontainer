@@ -9,13 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
+	"github.com/vyncint/openshell-driver-applecontainer/internal/compat"
+	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 )
 
 // Options configures a setup run.
@@ -103,6 +104,15 @@ func (s *Setup) agentLogPath() string {
 	return filepath.Join(s.Home, "Library", "Logs", "openshell-driver-applecontainer.log")
 }
 
+// DriverLogPath is where the launchd agent writes the driver's log.
+func DriverLogPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return (&Setup{Home: home}).agentLogPath(), nil
+}
+
 // Run performs the full idempotent setup.
 func (s *Setup) Run(ctx context.Context, opts Options) error {
 	step := func(msg string, args ...any) { s.Log.Info("setup: "+msg, args...) }
@@ -187,6 +197,18 @@ func (s *Setup) logVersions(opts Options) {
 		"apple_container", orUnknown(acVer),
 		"supervisor_image", opts.SupervisorImage)
 
+	// Compatibility verdicts — the security-advisory warning for old
+	// apple/container releases matters most here, because setup is the one
+	// command every user runs and reads.
+	for _, f := range append(compat.CheckAppleContainer(acVer), compat.CheckOpenShell(gwVer)...) {
+		switch f.Level {
+		case "warn":
+			s.Log.Warn("setup: " + f.Message)
+		case "error":
+			s.Log.Error("setup: " + f.Message)
+		}
+	}
+
 	if gwVer == "" || opts.SupervisorImage == "" {
 		return
 	}
@@ -197,22 +219,15 @@ func (s *Setup) logVersions(opts Options) {
 	}
 }
 
-// probeVersion runs `<bin> --version` and returns the trailing semver-ish
-// token, or "" when the binary is absent or prints something unexpected.
+// probeVersion runs `<bin> --version` and returns the first X.Y.Z token, or
+// "" when the binary is absent or prints something unexpected.
 func probeVersion(run func(string, ...string) (string, error), bin string) string {
 	out, err := run(bin, "--version")
 	if err != nil {
 		return ""
 	}
-	for _, f := range strings.Fields(out) {
-		if m := semverRe.FindStringSubmatch(strings.Trim(f, "()")); m != nil {
-			return m[1]
-		}
-	}
-	return ""
+	return backend.ParseVersionOutput(out)
 }
-
-var semverRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)$`)
 
 func orUnknown(s string) string {
 	if s == "" {
@@ -447,22 +462,9 @@ func (s *Setup) ensureNetwork(ctx context.Context, name string) (string, error) 
 	return ip, nil
 }
 
-// detectTLSDir mirrors the driver's guest-TLS default resolution.
-func (s *Setup) detectTLSDir() string {
-	if v := os.Getenv("OPENSHELL_LOCAL_TLS_DIR"); v != "" {
-		return v
-	}
-	xdg := filepath.Join(s.Home, ".local", "state", "openshell", "tls")
-	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
-		xdg = filepath.Join(v, "openshell", "tls")
-	}
-	for _, dir := range []string{"/opt/homebrew/var/openshell/tls", xdg} {
-		if _, err := os.Stat(filepath.Join(dir, "ca.crt")); err == nil {
-			return dir
-		}
-	}
-	return xdg
-}
+// detectTLSDir is the driver's own guest-TLS default resolution, so setup
+// regenerates SANs in the very bundle the driver hands to guests.
+func (s *Setup) detectTLSDir() string { return config.DefaultGuestTLSDir() }
 
 func (s *Setup) ensureCertSAN(tlsDir, ip string) error {
 	certPath := filepath.Join(tlsDir, "server", "tls.crt")

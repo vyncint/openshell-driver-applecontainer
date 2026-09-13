@@ -2,9 +2,11 @@
 
 Single source of truth for milestone state. Updated at every milestone boundary.
 
-Pinned upstream: OpenShell **v0.0.96** (`5541398ccbda05fd951e08e5741b9ca090717f3a`).
-Verified against OpenShell 0.0.96, 0.0.97, 0.0.111 and 0.0.113.
-Host: Apple silicon, macOS 26.6, apple/container 1.2.0, 1.2.2 and 1.3.0, Go 1.26.6.
+Vendored contract: OpenShell **v0.0.116** (all twelve RPCs implemented; the driver was
+originally written to v0.0.96 `5541398ccbda05fd951e08e5741b9ca090717f3a`).
+Verified against OpenShell 0.0.96, 0.0.97, 0.0.111, 0.0.113 and 0.0.116.
+Host: Apple silicon, macOS 26.6, apple/container 1.2.0, 1.2.2 and 1.3.0 (1.4.1 verified
+statically against its CLI and release notes; live run pending a sudo upgrade), Go 1.26.8.
 
 | Milestone | State | Notes |
 |---|---|---|
@@ -21,6 +23,7 @@ Host: Apple silicon, macOS 26.6, apple/container 1.2.0, 1.2.2 and 1.3.0, Go 1.26
 | Risk-fix round | **done** | Issues #1–#3 fixed and merged (console-tail diagnostics, startup preflight, driver-level kernel). |
 | One-command setup | **done** | `setup`/`uninstall` subcommands: launchd driver service, stock Homebrew gateway service wired via gateway.env, cert SAN, endpoint auto-derivation, image pre-pull. Live-verified including uninstall→setup round trip and KeepAlive restart. README rewritten quickstart-first. |
 | Release v0.2.0 | **done** | Tag `v0.2.0` (one-command setup + zero-config defaults + risk-fix round); release workflow green; assets published. |
+| Release v0.3.0 | **done** | Full v0.0.116 contract: `sandbox stop`/`start` (VM power-off/on, `Stopped` phase persisted across driver restarts), `-- <command>` via `OPENSHELL_MAIN_PROCESS_SPEC`, explicit workspace/listener RPCs. `status`/`doctor` and `logs` subcommands. Security: host-mount-root symlink escape closed, driver-owned supervisor env stripped from user env, apple/container <1.3.1 advisory warning. Go 1.26.8. Live-verified on OpenShell 0.0.116. |
 | Open-source prep | **done** | Governance set (MAINTAINERS, CODEOWNERS, code of conduct, templates), required DCO sign-off (hook + CI + web-commit setting), full secrets/history audit (clean), audit-driven doc fixes and code hardening — released as v0.2.1. Two design-decision follow-ups filed as issues (host-mount / network-override allowlists). |
 
 ## Known quirks / risks

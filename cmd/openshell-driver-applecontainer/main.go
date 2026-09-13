@@ -47,6 +47,10 @@ func main() {
 			os.Exit(runCleanup(args[1:]))
 		case "uninstall":
 			os.Exit(runUninstall(args[1:]))
+		case "status", "doctor":
+			os.Exit(runStatus(args[1:]))
+		case "logs":
+			os.Exit(runLogs(args[1:]))
 		case "help", "--help", "-h":
 			printUsage()
 			return
@@ -61,12 +65,27 @@ func main() {
 func printUsage() {
 	fmt.Print(`openshell-driver-applecontainer — OpenShell compute driver backed by apple/container
 
+Every OpenShell sandbox becomes its own micro-VM on Apple silicon. Three
+commands cover normal life: setup once, status when in doubt, update to
+move forward.
+
 Usage:
   openshell-driver-applecontainer setup [--no-pull] [--network NAME]
         One-time host setup: installs the driver as a launchd service,
         configures the OpenShell gateway service to use it, ensures the
         vmnet network and gateway certificate, and pre-pulls images.
         Idempotent — re-run any time to repair the installation.
+
+  openshell-driver-applecontainer status [--json]
+        Health report of the whole stack — apple/container, guest kernel,
+        vmnet network, gateway service and certificate, driver service and
+        socket, sandboxes — one line each, with what to do about any
+        problem. Exit status 1 when something needs attention. ("doctor"
+        is an alias.)
+
+  openshell-driver-applecontainer logs [-n N] [-f]
+        The driver service's log (failed sandboxes explain themselves
+        there). -n lines to show (default 50), -f to follow.
 
   openshell-driver-applecontainer update [--version vX.Y.Z] [--all] [--no-setup]
                                          [--openshell-version X.Y.Z]

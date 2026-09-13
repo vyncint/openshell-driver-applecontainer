@@ -231,7 +231,8 @@ func (s *Server) provisionInner(ctx context.Context, e *entry, sb *computev1.Dri
 		return fmt.Errorf("build environment: %w", err)
 	}
 	// The supervisor drops the workload to the image's intended user; it
-	// learns that identity from this variable (docker-driver parity).
+	// learns that identity from this variable (docker-driver parity). Set
+	// after sandboxEnv so a user environment can never supply it.
 	env[envOCIImageUser] = img.User
 
 	labels := make(map[string]string)

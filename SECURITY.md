@@ -59,9 +59,35 @@ two host-facing knobs a spec can set are gated by operator policy:
 - **The per-sandbox network override is allowlisted.** A spec's `network` must be `--network`
   or one of `--allowed-networks`; it cannot attach a sandbox to an arbitrary vmnet network.
 
+  `--host-mount-root` is enforced on the **symlink-resolved** source (and the resolved root):
+  a link inside the root pointing outside it is rejected with the resolved path named, and a
+  source that does not exist is refused rather than trusted.
+- **The supervisor's own variables are driver-owned.** A spec's or template's environment is
+  passed through to the guest, except for the names that carry the supervisor's identity,
+  transport and trust anchors — `OPENSHELL_ENDPOINT`, `OPENSHELL_TLS_CA/CERT/KEY`,
+  `OPENSHELL_GATEWAY_TLS_SERVER_NAME`, `OPENSHELL_SANDBOX_TOKEN(_FILE)`, `OPENSHELL_SANDBOX_ID`,
+  `OPENSHELL_SANDBOX`, `OPENSHELL_OCI_IMAGE_USER`, `OPENSHELL_SANDBOX_UID/GID`,
+  `OPENSHELL_MAIN_PROCESS_SPEC`, `PATH` and the other `OPENSHELL_*` controls. These are set by
+  the driver and stripped from the user environment (including the JSON copy the supervisor
+  injects into exec sessions), matching the upstream docker and VM drivers: a sandbox author who
+  could set the TLS server name could otherwise redirect the supervisor's certificate
+  verification and intercept the sandbox JWT.
+
 Even with these gates, treat the ability to submit sandbox specs as privileged in the
 intended single-user, single-tenant deployment. Enabling `--allow-host-mounts` without a
 `--host-mount-root` grants spec authors read/write to any of the invoking user's files.
+
+## Upstream runtime advisories
+
+The driver pulls and unpacks registry images through apple/container's Containerization
+package on every create. apple/container **1.3.1** fixed six advisories in that code
+(GHSA-x7pf-2jmj-pgcq container/image id path traversal, GHSA-f689-h8m7-3jp2 unvalidated OCI
+descriptor digests, GHSA-r3h2-rgqf-9hv9 symlink reads while loading an image layout,
+GHSA-mx96-5vvg-x2mg / CVE-2026-65388 unvalidated `WWW-Authenticate` realm, and two unpack
+crashers) and **1.4.1** two more (GHSA-4587-w9mm-xxvh, GHSA-rgqp-277h-gcwj). `setup`, `status`
+and the driver's startup log warn when the installed runtime predates 1.3.1 and print the
+upgrade command; the driver cannot perform that upgrade itself because Apple's installer
+requires `sudo`. The verified/recommended ranges live in `internal/compat`.
 
 ## Network policy overlay (`--network-policy-file`)
 

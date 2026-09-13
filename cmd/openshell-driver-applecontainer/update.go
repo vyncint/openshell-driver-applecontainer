@@ -36,8 +36,8 @@ func runUpdate(args []string) int {
 	targetVersion := fs.String("version", "", "install a specific driver release (e.g. v0.2.4); default: latest")
 	noSetup := fs.Bool("no-setup", false, "replace the binary but do not re-run setup")
 	all := fs.Bool("all", false, "also update the prerequisites: OpenShell (brew) and apple/container")
-	openshellVersion := fs.String("openshell-version", "", "with --all: pin OpenShell to this release (e.g. 0.0.111 or v0.0.111); default: its latest")
-	containerVersion := fs.String("container-version", "", "with --all: pin apple/container to this release (e.g. 1.2.0); default: its latest")
+	openshellVersion := fs.String("openshell-version", "", "with --all: pin OpenShell to this release (e.g. 0.0.116 or v0.0.116); default: its latest")
+	containerVersion := fs.String("container-version", "", "with --all: pin apple/container to this release (e.g. 1.4.1); default: its latest")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

@@ -1,33 +1,53 @@
 # OpenShell compute-driver contract notes
 
-Everything below was derived by reading NVIDIA/OpenShell at tag **v0.0.96**
-(commit `5541398ccbda05fd951e08e5741b9ca090717f3a`). File:line references are into that tree.
-
-> **The upstream contract has grown since.** As of OpenShell v0.0.113 it adds four RPCs —
-> `GetGatewayListenerRequirements`, `StartSandbox`, `EnsureWorkspace`, `DeleteWorkspace` — plus
-> `GetCapabilitiesResponse.gateway_manages_lifecycle` and `DriverSandboxSpec.command` / `.tty`.
-> This driver implements none of them and remains compatible: the gateway maps `Unimplemented`
-> to success for the three optional RPCs, and reaches `StopSandbox`/`StartSandbox` only through
-> the explicit `openshell sandbox stop`/`start` commands or lifecycle sweeps gated on the
-> `gateway_manages_lifecycle` capability this driver does not advertise. Verified live on
-> 0.0.111 and 0.0.113, whose `compute_driver.proto` are byte-identical. The sections below
-> still describe the v0.0.96 baseline this driver was written to.
-The two contract protos are vendored verbatim under `proto/` (see NOTICE).
+The vendored protos under `proto/` (see NOTICE) are from NVIDIA/OpenShell tag **v0.0.116**
+(commit `d1155aa70042d3e2ee49dbfa15346b108b7c1d92`), and this driver implements all twelve
+RPCs. The driver was originally written against **v0.0.96**
+(commit `5541398ccbda05fd951e08e5741b9ca090717f3a`), and the sections below keep that tree's
+file:line references for the mechanics that have not changed; §1a, §4 and §5 carry the
+0.0.116 additions, re-derived from that tree (`crates/openshell-server/src/compute/mod.rs`,
+`crates/openshell-core/src/sandbox_env.rs`, `crates/openshell-driver-docker/src/lib.rs`).
 
 ## 1. RPC surface (proto/compute_driver.proto, package openshell.compute.v1)
 
-Eight RPCs — well under this project's ~15-RPC kill criterion, and stable at this tag:
+Twelve RPCs at v0.0.116 (eight at v0.0.96); the gateway's stated rule for external drivers is
+that capability fields are additive and unknown fields must be ignored:
 
 | RPC | Notes |
 |---|---|
-| `GetCapabilities` | Handshake. First call the gateway makes after dialing the socket. Returns driver name/version and `default_image`. |
+| `GetCapabilities` | Handshake. First call the gateway makes after dialing the socket. Returns driver name/version, `default_image`, and (0.0.113+) `gateway_manages_lifecycle` — **we say `false`**: apple/container VMs outlive the gateway, so it must not stop them at its shutdown or start them at its startup. |
+| `GetGatewayListenerRequirements` | 0.0.113+. Extra listeners the gateway should bind (podman asks for its bridge address). **We return none**: macOS only materialises the vmnet host address while a VM is attached, so a bind at gateway start would fail; setup keeps `0.0.0.0` + mTLS. |
 | `ValidateSandboxCreate` | Called by the gateway **before** every create (grpc/sandbox.rs:257). Cheap validation only. |
-| `GetSandbox` | Point read; used by reconcile/delete recovery, not polled after create. |
+| `GetSandbox` | Point read; used by reconcile/delete recovery and by lifecycle-failure recovery, not polled after create. |
 | `ListSandboxes` | Called every 60 s by the gateway reconcile loop (compute/mod.rs:264-265). |
 | `CreateSandbox` | Returns an **empty response**; accept-then-provision. Progress flows via WatchSandboxes. |
-| `StopSandbox` | **Never called by the gateway in v0.0.96** (no lifecycle callsite; verified full-tree). The managed VM driver returns `Unimplemented`, and so do we (there is no caller to exercise a real implementation against). |
+| `StopSandbox` | Driven by `openshell sandbox stop` (phase must be `Ready`). Gateway writes `Stopping` first, calls us, then writes `Stopped` on success. **We `container stop` the VM and keep everything**; idempotent. See §1a. |
+| `StartSandbox` | 0.0.113+. Driven by `openshell sandbox start` (phase must be `Stopped`) and, for drivers advertising `gateway_manages_lifecycle`, by startup sweeps. **We `container start` the same container**; idempotent. |
 | `DeleteSandbox` | Must return `deleted=true` iff a platform resource was removed; gateway branches on it (compute/mod.rs:906-923). |
 | `WatchSandboxes` | Server stream. Gateway reconnects on a **fixed 2 s** cadence after stream end/error (compute/mod.rs:1642,1675). Replay a full snapshot on stream open, then stream diffs. |
+| `EnsureWorkspace` / `DeleteWorkspace` | 0.0.113+. Platform resources per workspace (a namespace on Kubernetes). Nothing to create here; **we answer success**. The gateway would also map `Unimplemented` to `Ok`. |
+
+### 1a. Stop / start phase mechanics (0.0.116 compute/mod.rs)
+
+- `stop_sandbox` (mod.rs:1054): requires phase `Ready` (or a retried `Stopping`), persists
+  `Stopping`, calls the driver detached from the request, then persists `Stopped`
+  (`write_lifecycle_phase`, reason `Stopped`). `start_sandbox` (mod.rs:1209) mirrors it with
+  `Starting`; the phase returns to `Ready` when our snapshot says `Ready=True` **and** the
+  restarted supervisor connects.
+- `apply_driver_snapshot` (mod.rs:3765): a sandbox in phase **`Stopped` keeps that phase
+  whatever the driver reports**; in `Stopping` it becomes `Stopped` when the snapshot's phase is
+  Stopped or `driver_snapshot_confirms_stopped` holds — a `Ready=False` condition whose reason is
+  `containerexited` or `containerstopped` (case-insensitive, mod.rs:3877). In `Starting` it stays
+  `Starting` unless the snapshot is `Ready` or `Error`.
+- `derive_phase` (mod.rs:4033): unchanged from §4 except that a `Suspended=True` condition (the
+  Kubernetes Agent-Sandbox shape) also yields `Stopped` when `Ready` is not `True`.
+- Failure recovery (`recover_failed_lifecycle`, mod.rs:1344): on a driver error the gateway
+  re-reads our snapshot; a terminal `Ready=False` there resolves the sandbox to `Error`, so a
+  failed **start** leaves the sandbox in `Error` (same as docker). A failed **stop** with the VM
+  still running restores the previous `Ready`.
+- Therefore this driver emits `ContainerStopped` for a VM it stopped on purpose (persisted in the
+  record so a restart re-emits it) and keeps `ContainerExited` — with the console-tail Warning —
+  for a VM that died on its own.
 
 ## 2. Gateway ↔ extension-driver mechanics
 
@@ -91,7 +111,8 @@ Condition vocabulary this driver emits (all `type="Ready"`):
 |---|---|---|
 | accepted / provisioning | False | `Starting` |
 | container `running` | True | `BackendReady` |
-| container stopped/exited | False | `ContainerExited` (terminal) |
+| container stopped/exited on its own | False | `ContainerExited` (terminal; console tail attached) |
+| container stopped via `StopSandbox` | False | `ContainerStopped` (terminal for `derive_phase`, but the gateway keeps/reaches `Stopped` — §1a) |
 | provisioning failed | False | `ProvisioningFailed` (terminal) |
 | deleting | False | `Deleting` + `deleting=true` |
 
@@ -103,14 +124,27 @@ drivers only `socket_path`). Canonical env names from core/sandbox_env.rs:
 - Required by the supervisor: `OPENSHELL_SANDBOX_ID`, `OPENSHELL_ENDPOINT`; with an `https://`
   endpoint also `OPENSHELL_TLS_CA/CERT/KEY` (each hard-required, grpc_client.rs:147-158); and
   a token source — we use `OPENSHELL_SANDBOX_TOKEN_FILE` (never the raw token in env).
-- Also set (parity with the docker/vm drivers): `OPENSHELL_SANDBOX` (name),
-  `OPENSHELL_SSH_SOCKET_PATH=/run/openshell/ssh.sock`, `OPENSHELL_SANDBOX_COMMAND=sleep
-  infinity`, `OPENSHELL_LOG_LEVEL`, `OPENSHELL_TELEMETRY_ENABLED`,
-  `OPENSHELL_OCI_IMAGE_USER=<image USER>` (so the supervisor drops the workload to the image's
-  user), `OPENSHELL_USER_ENVIRONMENT=<json of user env>` (when non-empty), `HOME=/root`,
-  `PATH=…`, `TERM=xterm`. User env (template then spec, spec wins) is applied first;
-  driver-owned keys win last. `template.agent_socket_path`, when set, overrides the SSH socket
-  path value.
+- Also set (parity with the docker/vm drivers at 0.0.116): `OPENSHELL_SANDBOX` (name),
+  `OPENSHELL_SSH_SOCKET_PATH=/run/openshell/ssh.sock`, `OPENSHELL_LOG_LEVEL`,
+  `OPENSHELL_TELEMETRY_ENABLED`, `OPENSHELL_OCI_IMAGE_USER=<image USER>` with
+  `OPENSHELL_SANDBOX_UID=""`/`OPENSHELL_SANDBOX_GID=""` (the "OCI user" identity contract: the
+  supervisor resolves the workload identity from the image, sandbox_env.rs:210-220),
+  `OPENSHELL_NETWORK_RUNTIME_CAPABILITIES=""` (like the VM driver we provide no policy-DNS /
+  transparent-TCP substrate, so the supervisor keeps explicit-proxy enforcement),
+  `OPENSHELL_USER_ENVIRONMENT=<json of user env>` (when non-empty), `HOME=/root`, `PATH=…`,
+  `TERM=xterm`. `template.agent_socket_path`, when set, overrides the SSH socket path value.
+- **Canonical process**: `OPENSHELL_MAIN_PROCESS_SPEC` = JSON
+  `{"version":1,"command":[…],"tty":bool}` (`MainProcessConfig`, sandbox_env.rs:33-112),
+  built from `DriverSandboxSpec.command`/`.tty`; with no command it is
+  `MainProcessConfig::scratch()` = `["/bin/bash","-l"]`, tty `true` — which is also what the
+  supervisor assumes when the variable is absent (openshell-sandbox/src/main.rs:660-670). The
+  historical `OPENSHELL_SANDBOX_COMMAND` is not read by any 0.0.113+ component.
+- **Ownership**: user env (template then spec, spec wins) is applied first, **minus** the
+  driver-owned names — the variables above plus `OPENSHELL_GATEWAY_TLS_SERVER_NAME`,
+  `OPENSHELL_SANDBOX_TOKEN`, `OPENSHELL_SANDBOX_TOKEN_FILE` and `PATH`, which the docker and VM
+  drivers likewise remove (docker lib.rs:2820-2828: "a sandbox user who can redirect the gateway
+  hostname could otherwise present a certificate for a name they control and intercept the
+  sandbox JWT"). Stripped names do not appear in `OPENSHELL_USER_ENVIRONMENT` either.
 - TLS material: the gateway's **shared client triple** (per-sandbox identity is the JWT, not
   the cert). Source on this machine: the gateway TLS state dir (`ca.crt`, `client/tls.crt`,
   `client/tls.key`; server/defaults.rs:19-38). Homebrew installs generate it via
@@ -197,8 +231,11 @@ stateDiagram-v2
   [*] --> Provisioning: CreateSandbox (validate · persist record · return OK)
   Provisioning --> Running: resolve image · build seed · container run -d
   Provisioning --> Failed: boot failed / record without VM (terminal)
+  Running --> Stopped: StopSandbox · container stop · ContainerStopped · stopped=true persisted
+  Stopped --> Running: StartSandbox · container start · BackendReady
   Running --> Exited: container stopped externally · ContainerExited (terminal)
   Running --> Deleting: DeleteSandbox
+  Stopped --> Deleting: DeleteSandbox
   Exited --> Deleting: DeleteSandbox
   Failed --> Deleting: DeleteSandbox
   Deleting --> [*]: cancel in-flight · container delete -f · remove state · Deleted event
@@ -211,8 +248,10 @@ stateDiagram-v2
 
 Restart reconcile: scan records ↔ `container ls -a`; adopt running VMs (apple/container VMs
 survive a driver restart — unlike libkrun children, which die with the driver); a record whose
-container is missing or stopped reports a terminal condition; containers carrying our
-`openshell.ai/managed-by` label without a record are orphans and are deleted.
+container is missing reports `ProvisioningFailed`, one whose container is stopped reports
+`ContainerStopped` when the record says `stopped: true` and `ContainerExited` (with console
+tail) otherwise; containers carrying our `openshell.ai/managed-by` label without a record are
+orphans and are deleted.
 
 ## Unverified assumptions
 

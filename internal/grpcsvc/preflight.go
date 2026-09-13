@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/vyncint/openshell-driver-applecontainer/internal/backend"
+	"github.com/vyncint/openshell-driver-applecontainer/internal/compat"
 	"github.com/vyncint/openshell-driver-applecontainer/internal/config"
 )
 
@@ -30,6 +31,7 @@ const gatewayPort = "17670"
 //   - Unreadable guest TLS files warn.
 func Preflight(ctx context.Context, cfg *config.Config, rt backend.Runtime, log *slog.Logger) error {
 	gatewayIP := ensureNetwork(ctx, cfg.Network, rt, log)
+	checkRuntimeVersion(ctx, rt, log)
 
 	if cfg.GRPCEndpoint == "" {
 		if gatewayIP != "" {
@@ -111,6 +113,28 @@ func ensureNetwork(ctx context.Context, name string, rt backend.Runtime, log *sl
 		}
 	}
 	return ""
+}
+
+// checkRuntimeVersion logs the apple/container compatibility verdict once at
+// startup — in particular the security-advisory warning for releases older
+// than 1.3.1, which the driver has no way to fix itself (the upgrade needs
+// sudo) but should never stay silent about.
+func checkRuntimeVersion(ctx context.Context, rt backend.Runtime, log *slog.Logger) {
+	ver, err := rt.Version(ctx)
+	if err != nil {
+		log.Debug("could not read the apple/container version", "err", err)
+		return
+	}
+	for _, f := range compat.CheckAppleContainer(ver) {
+		switch f.Level {
+		case "ok":
+			log.Debug(f.Message)
+		case "warn":
+			log.Warn(f.Message)
+		default:
+			log.Error(f.Message)
+		}
+	}
 }
 
 // isLoopbackHost reports whether an endpoint hostname can never be reached

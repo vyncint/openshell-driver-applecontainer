@@ -286,3 +286,58 @@ Resilience checks, all live:
   none after).
 - `uninstall` → agent, plist and gateway.env managed block removed, gateway service stopped;
   `setup` again → full stack back, sandbox lifecycle verified once more.
+
+## v0.3.0 — full v0.0.116 contract: stop/start, command spec, status (live, 2026-09-13)
+
+Host: OpenShell **0.0.116** (gateway + `supervisor:0.0.116`, upgraded via OpenShell's installer
+for this run), apple/container 1.3.0, macOS 26.6, Go 1.26.8. Baseline first: the released
+v0.2.13 driver passed the unchanged smoke on 0.0.116 before any code changed.
+
+The development build was run in place of the launchd service (`launchctl bootout`, then
+`bin/openshell-driver-applecontainer` on the same socket), with the service restored by
+`setup` afterwards. `e2e/smoke.sh` now covers stop/start and the command spec:
+
+```
+smoke: creating sandbox dev030
+smoke: sandbox is Ready
+smoke: exec: Linux oshl-93743d84-… 6.18.15 #1 SMP … aarch64 GNU/Linux
+smoke: forbidden egress blocked as expected
+smoke: sandbox stopped (VM powered off, record kept)
+smoke: sandbox started again and exec works
+smoke: canonical command ran with argument boundaries intact
+smoke: deleted cleanly
+smoke: PASS
+```
+
+- **Stop / start**: `openshell sandbox stop` → driver `container stop --time 10` → gateway phase
+  `Stopped`, `container ls -a` shows the VM `stopped`; `openshell sandbox start` → `container
+  start` → phase `Ready`, `exec` works again (same VM, same seed, same token).
+- **Command spec**: `create --detach --no-tty -- /bin/sh -c 'printf "%s" "a b" > /tmp/marker;
+  exec sleep 600'` → `exec cat /tmp/marker` returned `a b` — the space-bearing argument arrived
+  as one argument through `OPENSHELL_MAIN_PROCESS_SPEC`.
+- **Stopped survives a driver restart**: stop `adopt030` → kill the driver → start it →
+  `reconciled sandbox record … status=False reason=ContainerStopped`; `openshell sandbox list`
+  still `Stopped`; `openshell sandbox start adopt030` → `Ready`; `exec -- id` →
+  `uid=998(sandbox) gid=998(sandbox)`; delete clean, no `oshl-` VMs left.
+- **Idle poller**: with no sandboxes, zero `container ls` invocations over a 6 s window (debug
+  exec log), where every tick used to fork one.
+- **`status`** against the live stack reported every component OK, plus two true warnings:
+  apple/container 1.3.0 predates the 1.3.1 advisories (with the upgrade command), and the
+  running service was on an older build than the binary being run (`run setup to restart it`).
+
+Two things the run taught, both now encoded in `e2e/smoke.sh`:
+
+1. `sandbox create -- true` no longer leaves a running sandbox. The command is honoured, `true`
+   exits, and the supervisor logs `main-process exit acknowledged` → the sandbox ends in
+   `Error`, exactly as on the upstream drivers. A long-lived test sandbox is `create --detach`
+   with no command.
+2. `openshell sandbox exec` forwards the caller's stdin into the guest and returns only when it
+   closes, so a script run with an open stdin pipe hangs on its first exec; the smoke script
+   now does `exec </dev/null`. Right after a driver restart the gateway's first RPC over the
+   swapped socket can fail with a transport error while its channel reconnects; the create is
+   retried three times.
+
+apple/container **1.4.1** was verified statically (CLI surface diffed against 1.3.0: `run`,
+`stop`, `start`, `ls --format json` unchanged; `container clean` and the richer `system status`
+are additive) — a live run needs the `sudo` package installer and is left to the operator, who
+`status` now points at the exact command.

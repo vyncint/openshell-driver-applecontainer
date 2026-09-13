@@ -31,15 +31,19 @@ func ValidID(id string) bool {
 // encoding of the accepted DriverSandbox exactly as received, so restart
 // reconciliation can rebuild observations without loss.
 type Record struct {
-	ID            string          `json:"id"`
-	Name          string          `json:"name"`
-	Namespace     string          `json:"namespace,omitempty"`
-	Workspace     string          `json:"workspace,omitempty"`
-	ContainerName string          `json:"container_name"`
-	ImageRef      string          `json:"image_ref"`
-	ImageDigest   string          `json:"image_digest,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-	Sandbox       json.RawMessage `json:"sandbox,omitempty"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Namespace     string    `json:"namespace,omitempty"`
+	Workspace     string    `json:"workspace,omitempty"`
+	ContainerName string    `json:"container_name"`
+	ImageRef      string    `json:"image_ref"`
+	ImageDigest   string    `json:"image_digest,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	// Stopped records that the gateway stopped this sandbox on purpose
+	// (StopSandbox), so a non-running VM is reported as stopped rather than
+	// as an unexpected exit — across driver restarts too.
+	Stopped bool            `json:"stopped,omitempty"`
+	Sandbox json.RawMessage `json:"sandbox,omitempty"`
 }
 
 // Store reads and writes per-sandbox record files under

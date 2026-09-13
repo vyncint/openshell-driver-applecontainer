@@ -84,12 +84,26 @@ stateDiagram-v2
   [*] --> Provisioning: CreateSandbox accepted
   Provisioning --> Ready: VM running · BackendReady
   Provisioning --> Failed: boot error · ProvisioningFailed
+  Ready --> Stopped: StopSandbox · container stop · ContainerStopped
+  Stopped --> Ready: StartSandbox · container start · BackendReady
   Ready --> Exited: VM stopped out-of-band · ContainerExited
   Ready --> Deleting: DeleteSandbox
+  Stopped --> Deleting: DeleteSandbox
   Exited --> Deleting: DeleteSandbox
   Failed --> Deleting: DeleteSandbox
   Deleting --> [*]: VM + record removed
 ```
+
+**Stop / start** (`openshell sandbox stop` / `start`): the driver powers the VM off with
+`container stop` and keeps the container, the seed directory and the record — `container start`
+then boots the same configuration, so the supervisor reappears with the same identity,
+environment and token and dials the gateway back exactly as after a create. The intent is
+persisted (`stopped: true` in `state.json`) and reported with the `ContainerStopped` condition,
+which the gateway recognises when completing its `Stopping → Stopped` transition and which
+startup reconciliation honours, so a stopped sandbox never reads as `Error` — not even across a
+driver restart. While a stop or start is in flight the entry is marked busy and the poller skips
+it, so the half-way runtime state is never published. A VM started behind the gateway's back
+(`container start`) is reported truthfully as running and the stopped mark is dropped.
 
 ## Reconciliation
 
@@ -109,9 +123,10 @@ flowchart TB
   labeled `openshell.ai/managed-by=openshell-driver-applecontainer` without a record are
   deleted as orphans.
 - **Runtime poller** (2 s, docker-driver cadence): flips conditions on state changes and
-  publishes watch events. In-flight provisioning is skipped and original failure reasons are
-  preserved. The gateway additionally reconciles via `ListSandboxes` every 60 s and prunes
-  store rows absent from the backend after a 300 s grace period.
+  publishes watch events. In-flight provisioning, deletes and stop/start operations are
+  skipped, original failure reasons are preserved, and when nothing is pollable the tick does
+  not fork `container ls` at all. The gateway additionally reconciles via `ListSandboxes`
+  every 60 s and prunes store rows absent from the backend after a 300 s grace period.
 
 ## Security posture
 
@@ -119,9 +134,16 @@ flowchart TB
   recovery, and a symlink/ownership check on the (shared `/tmp`) socket directory.
 - **Sandbox token**: never in env or logs; written 0600 in the seed dir and redacted from
   persisted records (VMs are never relaunched from records, so the token need not be stored).
+- **Supervisor environment**: the variables that carry the supervisor's identity, transport
+  and trust anchors (`OPENSHELL_ENDPOINT`, TLS paths and `OPENSHELL_GATEWAY_TLS_SERVER_NAME`,
+  token variables, identity fields, `PATH`) are driver-owned — a sandbox's user environment
+  cannot set them, and they are stripped from the `OPENSHELL_USER_ENVIRONMENT` copy too. The
+  canonical process travels as a versioned JSON spec (`OPENSHELL_MAIN_PROCESS_SPEC`), never as
+  a shell string.
 - **Seed dir** mounted read-only; every seed file is owner-only. User-requested mounts cannot
   shadow reserved paths (including the seed), host **volume** mounts are opt-in
-  (`--allow-host-mounts` / `--host-mount-root`), and the network override is allowlisted.
+  (`--allow-host-mounts` / `--host-mount-root`, enforced on the symlink-resolved source), and
+  the network override is allowlisted.
 - **Privileges**: the boot shim and supervisor run as guest root with exactly the four
   capabilities the upstream docker driver grants (`SYS_ADMIN`, `NET_ADMIN`, `SYS_PTRACE`,
   `SYSLOG`) on top of the guest init's default set; workloads drop to the image's OCI user

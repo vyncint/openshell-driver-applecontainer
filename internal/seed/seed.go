@@ -275,18 +275,32 @@ func Write(dir string, m Materials) error {
 	return nil
 }
 
-// copyFile copies src to dst owner-only (0600); seed files are never
-// executed on the host and the parent dir is already 0700.
+// copyFile streams src to dst owner-only (0600); seed files are never
+// executed on the host and the parent dir is already 0700. Streaming
+// matters for the supervisor binary (~18 MB): reading it whole into memory
+// for every create is a needless spike when several sandboxes boot at once.
 func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src) // #nosec G304 -- src is an operator-configured or driver-cached path
+	in, err := os.Open(src) // #nosec G304 -- src is an operator-configured or driver-cached path
 	if err != nil {
 		return fmt.Errorf("seed: read %s: %w", src, err)
 	}
-	if err := os.WriteFile(dst, data, 0o600); err != nil {
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
 		return fmt.Errorf("seed: write %s: %w", dst, err)
 	}
-	if err := os.Chmod(dst, 0o600); err != nil {
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("seed: write %s: %w", dst, err)
+	}
+	// OpenFile's mode only applies to a newly created file; a re-seeded
+	// path (retry after a failed boot) keeps whatever mode it had.
+	if err := out.Chmod(0o600); err != nil {
+		_ = out.Close()
 		return fmt.Errorf("seed: chmod %s: %w", dst, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("seed: write %s: %w", dst, err)
 	}
 	return nil
 }
