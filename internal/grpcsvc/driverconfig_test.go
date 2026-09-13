@@ -1,6 +1,8 @@
 package grpcsvc
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -28,19 +30,47 @@ func TestCheckDriverConfigPolicyMounts(t *testing.T) {
 		t.Errorf("volume mount should be allowed with --allow-host-mounts, got %v", err)
 	}
 
-	// Opt-in with a root: only sources under the root.
-	rooted := config.Config{Network: "oshl", AllowHostMounts: true, HostMountRoot: "/Users/me"}
-	if err := checkDriverConfigPolicy(rooted, volume); err != nil {
+	// Opt-in with a root: only sources under the root. Real directories,
+	// because the check resolves symlinks and therefore needs them to exist.
+	hostDir := t.TempDir()
+	root := filepath.Join(hostDir, "me")
+	for _, d := range []string{
+		filepath.Join(root, "data"),
+		filepath.Join(hostDir, "mensa"),  // prefix-only sibling of root
+		filepath.Join(hostDir, "secret"), // outside root, symlink target
+	} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(hostDir, "secret"), filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	mount := func(src string) driverConfig {
+		return driverConfig{Mounts: []mountConfig{{Type: "volume", Source: src, Target: "/data"}}}
+	}
+	rooted := config.Config{Network: "oshl", AllowHostMounts: true, HostMountRoot: root}
+	if err := checkDriverConfigPolicy(rooted, mount(filepath.Join(root, "data"))); err != nil {
 		t.Errorf("source under root should be allowed, got %v", err)
 	}
-	outside := driverConfig{Mounts: []mountConfig{{Type: "volume", Source: "/etc", Target: "/data"}}}
-	if err := checkDriverConfigPolicy(rooted, outside); err == nil || !strings.Contains(err.Error(), "outside the permitted root") {
+	if err := checkDriverConfigPolicy(rooted, mount(root)); err != nil {
+		t.Errorf("the root itself should be allowed, got %v", err)
+	}
+	if err := checkDriverConfigPolicy(rooted, mount(filepath.Join(hostDir, "secret"))); err == nil || !strings.Contains(err.Error(), "outside the permitted root") {
 		t.Errorf("source outside root should be rejected, got %v", err)
 	}
 	// A sibling that only shares a prefix string is not "within".
-	sibling := driverConfig{Mounts: []mountConfig{{Type: "volume", Source: "/Users/mensa", Target: "/data"}}}
-	if err := checkDriverConfigPolicy(rooted, sibling); err == nil {
+	if err := checkDriverConfigPolicy(rooted, mount(filepath.Join(hostDir, "mensa"))); err == nil {
 		t.Errorf("prefix-only sibling must be rejected")
+	}
+	// A symlink inside the root that points outside it is the classic
+	// escape: lexically within, physically not.
+	if err := checkDriverConfigPolicy(rooted, mount(filepath.Join(root, "escape"))); err == nil || !strings.Contains(err.Error(), "resolves to") {
+		t.Errorf("symlink escape must be rejected with the resolved path named, got %v", err)
+	}
+	// Nonexistent sources cannot be verified and are refused.
+	if err := checkDriverConfigPolicy(rooted, mount(filepath.Join(root, "missing"))); err == nil || !strings.Contains(err.Error(), "not usable") {
+		t.Errorf("missing source must be rejected, got %v", err)
 	}
 }
 
