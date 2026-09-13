@@ -9,7 +9,7 @@ managed:
       path: options.proto
       value: github.com/vyncint/openshell-driver-applecontainer/internal/gen/optionsv1
 plugins:
-  - remote: buf.build/protocolbuffers/go:v1.36.6
+  - remote: buf.build/protocolbuffers/go:v1.36.12
     out: .
     opt: module=github.com/vyncint/openshell-driver-applecontainer
   - remote: buf.build/grpc/go:v1.5.1
